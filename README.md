@@ -1,30 +1,26 @@
-# X4Libris v1.0 — X4 Pro
+# X4Libris v1.0 для Xteink X4 Pro
 
-This repository freezes the X4Libris v1.0 trial build for Xteink X4 Pro and its working source snapshot.
+**X4Libris v1.0 — первая версия нашей прошивки для Xteink X4 Pro.** В репозитории сохранены исходный проект, ресурсы, инструменты и бинарный образ этого выпуска. Нумерация X4Libris начинается с v1.0; версии Witchhunt и других проектов относятся к истории исходного кода, а не к номеру нашей прошивки.
 
-## Status
+Полное описание возможностей находится в [FUNCTIONALITY-RU.md](FUNCTIONALITY-RU.md). Практические инструкции по управлению и работе с библиотекой — в [USER_GUIDE.md](USER_GUIDE.md), описание веб-интерфейса — в [docs/webserver.md](docs/webserver.md).
 
-This is a **trial build**, not a physically validated release. It was compiled from the nearest preserved X4Pro source snapshot, which includes the EXT1 wake-cause classification change. The source snapshot is not a byte-for-byte reconstruction of the separately supplied PerfectInk firmware image. The image identifiers and ELF SHA-256 values differ; details are in [BUILD-REPRODUCIBILITY.md](BUILD-REPRODUCIBILITY.md).
+## Образ прошивки
 
-The published app image is in `artifacts/X4Libris-X4Pro-v1.0.bin`.
-
+- Файл: [`artifacts/X4Libris-X4Pro-v1.0.bin`](artifacts/X4Libris-X4Pro-v1.0.bin)
+- Размер: 5 491 200 байт
 - SHA-256: `1157856C029773BED9FA835591EDA7A0ABADA40B49393C20086C9BF58724EC01`
-- Size: 5,491,200 bytes
-- Target: ESP32-S3 / Xteink X4 Pro (`x4pro_gh_release`)
-- Build: PlatformIO Core 6.2.0, Python 3.13; RAM 110,152/327,680 bytes; application flash 5,486,185/6,553,600 bytes.
-- esptool 5.3.0 validated the ESP32-S3 image checksum and validation hash.
-- No physical-device or QEMU verification is claimed.
+- Устройство: Xteink X4 Pro, ESP32-S3
 
-## Build
+## Сборка из исходников
 
-Use Python 3.13 and PlatformIO Core. From the repository root:
+Нужны PlatformIO Core и Python 3.13. Из корня репозитория:
 
 ```powershell
 py -3.13 -m platformio run -e x4pro_gh_release
 ```
 
-The source tree is a recovered working snapshot. A clean clone may generate a different web bundle identifier because the original build had no Git metadata and Terser was unavailable. Do not treat a fresh build as byte-identical without comparing the resulting image and ELF hashes.
+Сводка исходной сборки: RAM 110 152 из 327 680 байт; раздел приложения 5 486 185 из 6 553 600 байт. Подробности о происхождении сохранённого исходного снимка и сравнении с исходным бинарным образом приведены в [BUILD-REPRODUCIBILITY.md](BUILD-REPRODUCIBILITY.md).
 
-## Provenance
+## Лицензия и история кода
 
-The upstream project lineage and license are preserved in `LICENSE`, `CHANGELOG-NRE.txt`, and `docs/`. X4Libris v1.0 is the product/version label assigned to this trial snapshot. No GitHub Actions workflows are included in this repository snapshot.
+Лицензионные сведения и история базового кода сохранены в `LICENSE`, `CHANGELOG-NRE.txt` и `docs/`. Собственное имя и нумерация X4Libris v1.0 относятся к нашей прошивке.

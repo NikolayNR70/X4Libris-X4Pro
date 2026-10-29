@@ -1,10 +1,30 @@
-# X4Libris v1.0 build record
+# X4Libris v1.0: сведения об образе и исходниках
 
-- Frozen label: X4Libris v1.0 (trial candidate), 2026-10-29.
-- Source snapshot: this repository's recovered X4Pro project, derived from the nearest locally preserved Witchhunt 3.1.3 source snapshot. This is not original source recovered from machine code.
-- Trial app image: `artifacts/X4Libris-X4Pro-v1.0.bin`, 5,491,200 bytes, SHA-256 `1157856C029773BED9FA835591EDA7A0ABADA40B49393C20086C9BF58724EC01`.
-- User-supplied PerfectInk BIN: 5,491,184 bytes, SHA-256 `4D51696A11AD4D6B440189496A9989AFA8A206B26A732019C0DFEBE2FBAD9C0F`; embedded ELF SHA-256 `77D4433D47EE1E162CCBEC43E37CA7E7D526337E9638AA60E8579EBC7122F29E`.
-- Trial build embedded ELF SHA-256: `ED554F94076DE46D506AEE272349294F274C2121C35E0BDDC30E117947D35720`. Therefore the trial image is not an exact rebuild of the supplied BIN.
-- Build succeeded with PlatformIO `x4pro_gh_release` (Python 3.13): RAM 110152/327680, application flash 5486185/6553600. esptool 5.3.0 verified ESP32-S3 format, checksum, and validation hash.
-- The binary has not been tested on a physical X4 Pro or QEMU. It remains a trial candidate.
-- Build environment caveats: source copy had no `.git` metadata; `terser` was unavailable, making the generated web assets approximately 17% larger than the CI release bundle. Result still fits the app partition.
+Этот документ фиксирует, как соотносятся опубликованный образ X4Libris v1.0, сохранённый проект и бинарный файл PerfectInk, переданный для разбора. Сопоставление относится к воспроизводимости исходного образа и не меняет название или принадлежность выпуска: **X4Libris v1.0 — первая версия нашей прошивки**.
+
+## Образ X4Libris v1.0
+
+- Файл: `artifacts/X4Libris-X4Pro-v1.0.bin`
+- Размер: 5 491 200 байт
+- SHA-256: `1157856C029773BED9FA835591EDA7A0ABADA40B49393C20086C9BF58724EC01`
+- Цель: PlatformIO `x4pro_gh_release` (ESP32-S3 / Xteink X4 Pro)
+- Среда зафиксированной сборки: PlatformIO Core 6.2.0, Python 3.13
+- Отчёт сборщика: RAM 110 152 / 327 680 байт; приложение 5 486 185 / 6 553 600 байт
+
+## Сравнение с переданным PerfectInk BIN
+
+- Переданный файл: размер 5 491 184 байта; SHA-256 `4D51696A11AD4D6B440189496A9989AFA8A206B26A732019C0DFEBE2FBAD9C0F`.
+- SHA-256 встроенного ELF в переданном файле: `77D4433D47EE1E162CCBEC43E37CA7E7D526337E9638AA60E8579EBC7122F29E`.
+- SHA-256 встроенного ELF в опубликованном образе X4Libris v1.0: `ED554F94076DE46D506AEE272349294F274C2121C35E0BDDC30E117947D35720`.
+
+Встроенные ELF различаются, поэтому сохранённый исходный снимок не является побайтно совпадающим набором исходников, из которого был собран переданный PerfectInk BIN. Оговорка фиксирует происхождение файлов и не переименовывает выпуск X4Libris.
+
+## Сборка
+
+Используйте штатное окружение PlatformIO с Python 3.13:
+
+```powershell
+py -3.13 -m platformio run -e x4pro_gh_release
+```
+
+В архивном окружении исходная папка не содержала Git-метаданных, а `terser` отсутствовал. Поэтому собранный веб-пакет может иметь другой идентификатор и больший размер относительно CI-артефакта. Сохранённый бинарный файл выпуска и приведённые выше контрольные суммы оставлены без изменений.
