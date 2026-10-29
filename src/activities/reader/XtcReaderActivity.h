@@ -1,0 +1,45 @@
+/**
+ * XtcReaderActivity.h
+ *
+ * XTC ebook reader activity for CrossPoint Reader
+ * Displays pre-rendered XTC pages on e-ink display
+ */
+
+#pragma once
+
+#include <Xtc.h>
+
+#include "ReaderUtils.h"
+#include "activities/Activity.h"
+
+class XtcReaderActivity final : public Activity {
+  std::shared_ptr<Xtc> xtc;
+
+  uint32_t currentPage = 0;
+  int pagesUntilFullRefresh = 0;
+  ReaderUtils::InputDrainGuard inputDrainGuard;
+
+  void renderPage();
+  void saveProgress() const;
+  void loadProgress();
+  // Open the chapter list. False when the book has none, so the caller can let the input that
+  // asked for it go on to mean something else. Shared by Confirm and the touch menu gesture --
+  // one entry point, so the two can never open different things.
+  bool openChapterSelection();
+
+ public:
+  explicit XtcReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Xtc> xtc)
+      : Activity("XtcReader", renderer, mappedInput), xtc(std::move(xtc)) {}
+  void onEnter() override;
+  void onExit() override;
+  void loop() override;
+  void render(RenderLock&&) override;
+  bool isReaderActivity() const override { return true; }
+  void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;
+  bool handleForcedRefresh(HalDisplay::RefreshMode mode) override;
+
+  // Renders the last saved page to the frame buffer without flushing to display.
+  // Used by SleepActivity to prepare the background for the overlay sleep mode.
+  // Returns false if the page cannot be loaded (missing cache / file error).
+  static bool drawCurrentPageToBuffer(const std::string& filePath, GfxRenderer& renderer);
+};

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--#include file="shared/ThemeInit.html.inc" -->
+  <title>System Info - %%CROSSPOINT%%</title>
+  <style>
+    <!--#include file="shared/Theme.css.inc" -->
+    <!--#include file="shared/NavLinks.css.inc" -->
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .info-grid .card { margin: 0; }
+    .card h2 { font-size: 1rem; margin-bottom: 6px; }
+    .action-row { margin-top: 10px; }
+    .report { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .report p { margin: 0; }
+    .debug-footer { display: flex; gap: 16px; font-size: 0.78rem; color: var(--text-muted); }
+  </style>
+</head>
+
+<body>
+  <!--#include file="shared/PageHeader.html.inc" -->
+
+  <main class="page">
+    <div class="page-head">
+      <h1>System Info</h1>
+      <p class="page-intro">What the reader reports about itself.</p>
+    </div>
+
+    <div class="info-grid">
+      <section class="card">
+        <h2>Version</h2>
+        <div class="info-row"><span class="label">Firmware</span><span class="value" id="version">Loading...</span></div>
+        <div class="info-row"><span class="label">Device</span><span class="value" id="device">Loading...</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Network</h2>
+        <div class="info-row"><span class="label">Wi-Fi</span><span class="value" id="wifi-status">Loading...</span></div>
+        <div class="info-row"><span class="label">IP address</span><span class="value" id="ip-address">Loading...</span></div>
+        <div class="info-row"><span class="label">MAC address</span><span class="value" id="mac-address">Loading...</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Runtime</h2>
+        <div class="info-row"><span class="label">Uptime</span><span class="value" id="uptime">Loading...</span></div>
+        <div class="info-row"><span class="label">Battery</span><span class="value" id="battery">Loading...</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Storage</h2>
+        <div class="info-row"><span class="label">SD card</span><span class="value" id="sd-space">Not loaded</span></div>
+        <div class="action-row"><button type="button" class="btn btn-small" id="load-sd-button">Load SD info</button></div>
+      </section>
+
+      <section class="card">
+        <h2>Chip</h2>
+        <div class="info-row"><span class="label">Chip</span><span class="value" id="chip-version">Loading...</span></div>
+        <div class="info-row"><span class="label">CPU</span><span class="value" id="cpu-mhz">Loading...</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Memory and flash</h2>
+        <div class="info-row"><span class="label">Heap free / min / max</span><span class="value" id="heap-combined">Loading...</span></div>
+        <div class="info-row"><span class="label">App partition</span><span class="value" id="app-partition-size">Loading...</span></div>
+        <div class="info-row"><span class="label">Total flash</span><span class="value" id="flash-total">Loading...</span></div>
+      </section>
+    </div>
+
+    <div class="card report">
+      <p>Reporting a problem? Diagnostics shows how the reader last slept and started, and saves a report to attach
+        to the issue.</p>
+      <a class="btn" href="/diagnostics">Open Diagnostics</a>
+    </div>
+
+    <div class="debug-footer">
+      <span>Fast fetch: <span id="fast-status-duration">…</span></span>
+      <span>Full fetch: <span id="full-status-duration">—</span></span>
+    </div>
+  </main>
+
+  <script>
+    function pickUnit(maxBytes) {
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let div = 1, i = 0;
+      while (maxBytes >= 1024 && i < units.length - 1) { maxBytes /= 1024; div *= 1024; i++; }
+      return { unit: units[i], div };
+    }
+
+    function formatBytes(bytes) {
+      if (bytes == null) return 'N/A';
+      const { unit, div } = pickUnit(bytes);
+      if (div === 1) return bytes.toLocaleString() + ' ' + unit;
+      return parseFloat((bytes / div).toFixed(2)).toLocaleString() + ' ' + unit;
+    }
+
+    function formatBytesTriple(a, b, c) {
+      if (a == null || b == null || c == null) return 'N/A';
+      const { unit, div } = pickUnit(Math.max(a, b, c));
+      const fmt = (v) => div === 1 ? v.toLocaleString() : parseFloat((v / div).toFixed(2)).toLocaleString();
+      return fmt(a) + ' / ' + fmt(b) + ' / ' + fmt(c) + ' ' + unit;
+    }
+
+    const SD_LABELS = {
+      NOT_LOADED: 'Not loaded',
+      LOAD_BUTTON: 'Load SD info',
+      LOADING: 'Loading...',
+      ERROR: 'Error loading'
+    };
+
+    let sdLoading = false;
+
+    function formatUptime(seconds) {
+      if (seconds == null) return 'N/A';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      return h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(s).padStart(2, '0') + 's';
+    }
+
+    function formatDuration(ms) {
+      return ms == null ? 'N/A' : ms + ' ms';
+    }
+
+    function applyStatus(data, includeSd) {
+      document.getElementById('version').textContent = data.version || 'N/A';
+      const deviceLabel = data.deviceType
+        ? (data.displayWidth && data.displayHeight
+          ? data.deviceType + ' (' + data.displayWidth + ' × ' + data.displayHeight + ' px)'
+          : data.deviceType)
+        : 'N/A';
+      document.getElementById('device').textContent = deviceLabel;
+      document.getElementById('chip-version').textContent = data.chipVersion || 'N/A';
+      document.getElementById('cpu-mhz').textContent = data.cpuMHz
+        ? data.cpuMHz.toLocaleString() + ' MHz'
+        : 'N/A';
+      const wifiStatus = document.getElementById('wifi-status');
+      wifiStatus.textContent = data.mode || 'N/A';
+      document.getElementById('ip-address').textContent = data.ip || 'N/A';
+      document.getElementById('mac-address').textContent = data.macAddress || 'N/A';
+      document.getElementById('heap-combined').textContent =
+        formatBytesTriple(data.freeHeap, data.minFreeHeap, data.maxAllocHeap);
+      document.getElementById('app-partition-size').textContent = data.appPartitionSize != null
+        ? formatBytes(data.appPartitionSize)
+        : 'N/A';
+      document.getElementById('flash-total').textContent = data.flashTotal != null
+        ? formatBytes(data.flashTotal)
+        : 'N/A';
+      document.getElementById('battery').textContent = (data.batteryPercent != null)
+        ? (data.batteryPercent + '%' + (data.charging ? ' (Charging)' : ''))
+        : 'N/A';
+      document.getElementById('uptime').textContent = formatUptime(data.uptime);
+
+      if (includeSd) {
+        document.getElementById('sd-space').textContent = data.sdTotal
+          ? formatBytes(data.sdUsed) + ' / ' + formatBytes(data.sdTotal)
+          : 'N/A';
+      } else if (!sdLoading) {
+        document.getElementById('sd-space').textContent = SD_LABELS.NOT_LOADED;
+      }
+    }
+
+    async function fetchStatus() {
+      const start = performance.now();
+      try {
+        const fastResponse = await fetch('/api/status/fast');
+        if (!fastResponse.ok) {
+          throw new Error('Failed to fetch fast status: ' + fastResponse.status + ' ' + fastResponse.statusText);
+        }
+        const fastData = await fastResponse.json();
+        applyStatus(fastData, false);
+        document.getElementById('fast-status-duration').textContent = formatDuration(Math.round(performance.now() - start));
+      } catch (error) {
+        console.error('Error fetching status:', error);
+        document.getElementById('sd-space').textContent = SD_LABELS.ERROR;
+        document.getElementById('fast-status-duration').textContent = 'Error';
+      } finally {
+        if (!sdLoading) {
+          setSdButtonState(true);
+        }
+      }
+    }
+
+    async function fetchSdStatus() {
+      if (sdLoading) {
+        return;
+      }
+
+      const button = document.getElementById('load-sd-button');
+      sdLoading = true;
+      button.disabled = true;
+      button.textContent = SD_LABELS.LOADING;
+      document.getElementById('sd-space').textContent = SD_LABELS.LOADING;
+      document.getElementById('full-status-duration').textContent = 'Loading...';
+
+      const start = performance.now();
+
+      try {
+        const response = await fetch('/api/status?phase=full');
+        if (!response.ok) {
+          throw new Error('Failed to fetch SD status: ' + response.status + ' ' + response.statusText);
+        }
+        const data = await response.json();
+        applyStatus(data, true);
+        button.style.display = 'none';
+        document.getElementById('full-status-duration').textContent = formatDuration(Math.round(performance.now() - start));
+      } catch (error) {
+        console.error('Error fetching SD status:', error);
+        button.disabled = false;
+        button.textContent = SD_LABELS.LOAD_BUTTON;
+        document.getElementById('sd-space').textContent = SD_LABELS.ERROR;
+        document.getElementById('full-status-duration').textContent = 'Error';
+      } finally {
+        sdLoading = false;
+      }
+    }
+
+    function setSdButtonState(enabled) {
+      const button = document.getElementById('load-sd-button');
+      button.disabled = !enabled;
+      button.textContent = enabled ? SD_LABELS.LOAD_BUTTON : SD_LABELS.LOADING;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      setSdButtonState(false);
+      document.getElementById('load-sd-button').addEventListener('click', () => {
+        if (sdLoading) {
+          return;
+        }
+        fetchSdStatus();
+      });
+      fetchStatus();
+    });
+  </script>
+</body>
+
+</html>

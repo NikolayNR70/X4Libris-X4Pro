@@ -1,0 +1,46 @@
+# Development Workflow
+
+This page defines the expected local workflow before opening a pull request.
+
+## 1) Fork and create a focused branch
+
+- Fork the repository to your own GitHub account
+- Clone your fork locally and add the upstream repository if needed
+- Enable repo hooks once per clone: `git config core.hooksPath .githooks && chmod +x .githooks/pre-commit`
+
+- Branch from `master`
+- Keep each PR focused on one fix or feature area
+
+## 2) Implement with scope in mind
+
+- Confirm your idea is in project scope: [SCOPE.md](../../SCOPE.md)
+- Prefer incremental changes over broad refactors
+
+## 3) Run local checks
+
+```sh
+./bin/clang-format-fix
+pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+pio run
+```
+
+CI enforces formatting, static analysis, a build for each board (`default`, `x4pro`, `lilygo_t5s3`) and the host tests.
+If your change touches code the host tests cover, run them locally too; see [Testing and Debugging](./testing-debugging.md#host-tests).
+Use clang-format 21+ locally to match CI.
+If `clang-format` is missing or too old locally, see [Getting Started](./getting-started.md).
+If your change affects release automation, also dry-run the release workflows locally with `act` before opening the PR. See [Testing and Debugging](./testing-debugging.md#test-release-workflows-locally-with-act).
+
+## 4) Open the PR
+
+- Use a semantic title (example: `fix: avoid crash when opening malformed epub`)
+- Fill out `.github/PULL_REQUEST_TEMPLATE.md`
+- Describe the problem, approach, and any tradeoffs
+- Include reproduction and verification steps for bug fixes
+
+## 5) Review etiquette
+
+- Be explicit and concise in responses
+- Keep discussions technical and respectful
+- Assume good intent and focus on code-level feedback
+
+For community expectations, see [GOVERNANCE.md](../../GOVERNANCE.md).

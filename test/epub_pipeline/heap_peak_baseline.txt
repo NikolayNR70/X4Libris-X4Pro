@@ -1,0 +1,14 @@
+# fixture mode heap-side-peak-bytes (see heap_peak_check.py; regenerate with UPDATE_HEAP_BASELINE=1)
+# Moby-Dick heap updated from Linux CI's measured v3 baseline on 2026-10-23; v3.0.1 changes do not touch EPUB pipeline sources.
+epubs/test_inline_footnotes.epub arena 26465
+epubs/test_inline_footnotes.epub heap 42763
+epubs/test_jpeg_images.epub arena 28136
+epubs/test_jpeg_images.epub heap 47396
+epubs/test_jpeg_metadata_heavy.epub arena 26424
+epubs/test_jpeg_metadata_heavy.epub heap 61462
+epubs/test_table_streaming.epub arena 35805
+epubs/test_table_streaming.epub heap 56778
+fixtures/moby-dick.epub arena 54651
+fixtures/moby-dick.epub heap 75069
+fixtures/test_large_css.epub arena 26457
+fixtures/test_large_css.epub heap 36275
