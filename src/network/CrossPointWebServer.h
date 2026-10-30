@@ -154,6 +154,9 @@ class CrossPointWebServer {
   void handleSettingsPage() const;
   void handleGetSettings() const;
   void handlePostSettings();
+  void handleGetWeatherSettings() const;
+  void handlePostWeatherSettings();
+  void handleGetWeatherCitySearch() const;
 
   // Font management handlers
   void handleFontsPage() const;

@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -42,6 +43,8 @@
 #include "WebDAVHandler.h"
 #include "WebPathGuard.h"
 #include "WifiCredentialStore.h"
+#include <WeatherSettingsStore.h>
+#include <WeatherClient.h>
 #include "html/WebSetupPageHtml.generated.h"
 #include "network/HttpDownloader.h"
 #include "util/FontManifestReader.h"
@@ -441,6 +444,9 @@ void CrossPointWebServer::begin() {
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  server->on("/api/weather-settings", HTTP_GET, [this] { handleGetWeatherSettings(); });
+  server->on("/api/weather-settings", HTTP_POST, [this] { handlePostWeatherSettings(); });
+  server->on("/api/weather-cities", HTTP_GET, [this] { handleGetWeatherCitySearch(); });
 
   // Font management endpoints
   server->on("/stats", HTTP_GET, [this] { handleStatsPage(); });
@@ -2206,6 +2212,127 @@ void CrossPointWebServer::handlePostSettings() {
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
+}
+
+// Weather settings are stored separately from the general SettingsList. The web client receives
+// only a flag for the optional provider key; the secret itself is never returned by this endpoint.
+void CrossPointWebServer::handleGetWeatherSettings() const {
+  if (rejectIfLowMemory(server.get())) return;
+
+  JsonDocument doc;
+  doc["locationConfigured"] = WEATHER_SETTINGS.hasLocation();
+  doc["locationName"] = WEATHER_SETTINGS.getLocationName();
+  doc["latitude"] = WEATHER_SETTINGS.getLatitude();
+  doc["longitude"] = WEATHER_SETTINGS.getLongitude();
+  doc["apiKeyConfigured"] = !WEATHER_SETTINGS.getOpenWeatherApiKey().empty();
+  doc["tempUnit"] = static_cast<uint8_t>(WEATHER_SETTINGS.getTempUnit());
+  doc["windUnit"] = static_cast<uint8_t>(WEATHER_SETTINGS.getWindUnit());
+  doc["precipUnit"] = static_cast<uint8_t>(WEATHER_SETTINGS.getPrecipUnit());
+
+  String json;
+  serializeJson(doc, json);
+  server->send(200, "application/json", json);
+}
+
+void CrossPointWebServer::handlePostWeatherSettings() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  const String body = server->arg("plain");
+  if (body.length() > 1024) {
+    server->send(413, "text/plain", "Weather settings body is too large");
+    return;
+  }
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err || !doc.is<JsonObject>()) {
+    server->send(400, "text/plain", "Invalid weather settings JSON");
+    return;
+  }
+
+  const bool clearLocation = doc["clearLocation"] | false;
+  const bool hasLocationName = doc["locationName"].is<const char*>();
+  const bool hasLatitude = doc["latitude"].is<float>() || doc["latitude"].is<int>() || doc["latitude"].is<long>();
+  const bool hasLongitude = doc["longitude"].is<float>() || doc["longitude"].is<int>() || doc["longitude"].is<long>();
+  const bool hasTempUnit = doc["tempUnit"].is<int>();
+  const bool hasWindUnit = doc["windUnit"].is<int>();
+  const bool hasPrecipUnit = doc["precipUnit"].is<int>();
+  const bool hasApiKey = doc["apiKey"].is<const char*>();
+  const bool clearApiKey = doc["clearApiKey"] | false;
+
+  const std::string locationName = hasLocationName ? doc["locationName"].as<std::string>() : "";
+  const float latitude = hasLatitude ? doc["latitude"].as<float>() : WEATHER_SETTINGS.getLatitude();
+  const float longitude = hasLongitude ? doc["longitude"].as<float>() : WEATHER_SETTINGS.getLongitude();
+  const std::string apiKey = hasApiKey ? doc["apiKey"].as<std::string>() : "";
+
+  if (locationName.size() > 96 || !std::isfinite(latitude) || !std::isfinite(longitude) || latitude < -90.0f ||
+      latitude > 90.0f || longitude < -180.0f || longitude > 180.0f || apiKey.size() > 64 ||
+      (hasTempUnit && (doc["tempUnit"].as<int>() < 0 || doc["tempUnit"].as<int>() > 1)) ||
+      (hasWindUnit && (doc["windUnit"].as<int>() < 0 || doc["windUnit"].as<int>() > 3)) ||
+      (hasPrecipUnit && (doc["precipUnit"].as<int>() < 0 || doc["precipUnit"].as<int>() > 1))) {
+    server->send(400, "text/plain", "Weather settings value is out of range");
+    return;
+  }
+  // Match the native editor's single-token format. Validate before changing any stored value.
+  if (hasApiKey && !apiKey.empty() && apiKey.find_first_of("&=?# \t\r\n") != std::string::npos) {
+    server->send(400, "text/plain", "Invalid API key format");
+    return;
+  }
+
+  if (clearLocation) {
+    WEATHER_SETTINGS.clearLocation();
+  } else if (hasLocationName || hasLatitude || hasLongitude) {
+    const std::string& nextName = hasLocationName ? locationName : WEATHER_SETTINGS.getLocationName();
+    WEATHER_SETTINGS.setLocation(latitude, longitude, nextName);
+  }
+
+  if (hasTempUnit) WEATHER_SETTINGS.setTempUnit(static_cast<WeatherTempUnit>(doc["tempUnit"].as<uint8_t>()));
+  if (hasWindUnit) WEATHER_SETTINGS.setWindUnit(static_cast<WeatherWindUnit>(doc["windUnit"].as<uint8_t>()));
+  if (hasPrecipUnit) WEATHER_SETTINGS.setPrecipUnit(static_cast<WeatherPrecipUnit>(doc["precipUnit"].as<uint8_t>()));
+  if (clearApiKey) {
+    WEATHER_SETTINGS.setOpenWeatherApiKey("");
+  } else if (hasApiKey && !apiKey.empty()) {
+    // Never log or echo the key.
+    WEATHER_SETTINGS.setOpenWeatherApiKey(apiKey);
+  }
+
+  if (!WEATHER_SETTINGS.saveToFile()) {
+    server->send(500, "text/plain", "Could not save weather settings");
+    return;
+  }
+
+  server->send(200, "application/json", "{\"ok\":true}");
+}
+
+void CrossPointWebServer::handleGetWeatherCitySearch() const {
+  if (rejectIfLowMemory(server.get())) return;
+  const String query = server->arg("q");
+  if (query.isEmpty() || query.length() > 64) {
+    server->send(400, "text/plain", "Enter a city name (up to 64 characters)");
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server->send(503, "text/plain", "Connect the reader to Wi-Fi before searching for a city");
+    return;
+  }
+
+  const auto results = WeatherClient::searchCity(std::string(query.c_str()));
+  JsonDocument doc;
+  JsonArray list = doc.to<JsonArray>();
+  for (const auto& result : results) {
+    JsonObject entry = list.add<JsonObject>();
+    entry["name"] = result.name;
+    entry["region"] = result.admin1;
+    entry["country"] = result.country;
+    entry["latitude"] = result.latitude;
+    entry["longitude"] = result.longitude;
+  }
+  String json;
+  serializeJson(doc, json);
+  server->send(200, "application/json", json);
 }
 
 // ---- Font Management API ----

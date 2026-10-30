@@ -131,6 +131,14 @@
       <div>
         <div id="settingsPanels"><div class="loader" aria-label="Loading"></div></div>
 
+        <section class="panel hidden" id="panel-weather" data-title="Погода">
+          <div class="panel-head">
+            <h2>Погода</h2>
+            <p>Местоположение и единицы измерения прогноза. Погода остаётся доступной; отдельного выключателя здесь нет.</p>
+          </div>
+          <div class="card" id="weatherSettings"></div>
+        </section>
+
         <section class="panel hidden" id="panel-wifi" data-title="Wi-Fi networks">
           <div class="panel-head">
             <h2>Сети Wi-Fi</h2>
@@ -181,7 +189,7 @@
   // with the other settings.
   const OPDS_GLOBAL_KEYS = ['opdsDownloadFolder', 'opdsFilenameFormat'];
   const MAX_OPDS_SERVERS = 8;
-  const EXTRA_PANELS = ['wifi', 'opds', 'plugins'];
+  const EXTRA_PANELS = ['weather', 'wifi', 'opds', 'plugins'];
 
   let settings = [];      // as GET /api/settings sent them; value is what the reader holds
   let categories = [];    // [{id, name, rows}], in the order the reader lists them
@@ -340,15 +348,26 @@
   // a run of rows sharing a submenu forms a group inside the section.
   function sectionCards(cat) {
     const cards = [];
+    const cardsBySection = new Map();
     let card = null, rows = null, groupName = '', sectionName = '';
     const newCard = (title) => {
       sectionName = title || '';
+      // A section can reappear later in the firmware's setting order (for example, the two
+      // screen-refresh controls are separated by sleep and frontlight settings). Reuse its card
+      // so one logical section stays together in the web interface.
+      if (sectionName && cardsBySection.has(sectionName)) {
+        card = cardsBySection.get(sectionName);
+        rows = null;
+        groupName = '';
+        return;
+      }
       title = ruLabel(title);
       const sectionHelp = lookupLocalized(SETTINGS_HELP.sections, title);
       card = el('div', { className: 'card settings-section' }, [
         title ? el('h3', { textContent: title }) : null,
         sectionHelp ? el('p', { className: 'section-help', textContent: sectionHelp }) : null]);
       cards.push(card);
+      if (sectionName) cardsBySection.set(sectionName, card);
       rows = null;
       groupName = '';
     };
@@ -392,7 +411,7 @@
     // then the three panels with endpoints of their own.
     $('categoryNav').replaceChildren(
       el('div', { className: 'cat-group', textContent: 'На устройстве' }),
-      el('div', { className: 'cat-list' }, categories.map((c) => link(c.id, ruLabel(c.name)))),
+      el('div', { className: 'cat-list' }, [...categories.map((c) => link(c.id, ruLabel(c.name))), link('weather', 'Погода')]),
       el('div', { className: 'cat-group', textContent: 'Подключения' }),
       el('div', { className: 'cat-list' }, [
         link('wifi', 'Сети Wi-Fi'),
@@ -586,6 +605,125 @@
     if (!r.ok) throw new Error((await r.text()) || 'the reader answered ' + r.status);
   }
 
+  // ---- Weather --------------------------------------------------------------------------------
+
+  let weatherSettings = null;
+
+  function weatherSelect(id, label, value, choices) {
+    const select = el('select', { id });
+    for (const [v, text] of choices) select.append(el('option', { value: String(v), textContent: text }));
+    select.value = String(value);
+    return field(label, select);
+  }
+
+  function renderWeather() {
+    if (!weatherSettings) return;
+    const locName = el('input', { type: 'text', id: 'weather-location-name', maxlength: 96,
+      value: weatherSettings.locationName || '', placeholder: 'Например, Москва' });
+    const lat = el('input', { type: 'number', id: 'weather-latitude', min: -90, max: 90, step: '0.0001',
+      value: weatherSettings.locationConfigured ? Number(weatherSettings.latitude || 0).toFixed(4) : '' });
+    const lon = el('input', { type: 'number', id: 'weather-longitude', min: -180, max: 180, step: '0.0001',
+      value: weatherSettings.locationConfigured ? Number(weatherSettings.longitude || 0).toFixed(4) : '' });
+    const key = el('input', { type: 'password', id: 'weather-api-key', maxlength: 64, autocomplete: 'new-password',
+      placeholder: weatherSettings.apiKeyConfigured ? 'Ключ сохранён; введите новый для замены' : 'Необязательно' });
+    const cityQuery = el('input', { type: 'search', id: 'weather-city-query', maxlength: 64,
+      placeholder: 'Введите название города', autocomplete: 'off' });
+    const citySearch = el('div', { className: 'item-actions' }, [cityQuery,
+      el('button', { type: 'button', className: 'btn', textContent: 'Найти город', onclick: searchWeatherCities })]);
+    const cityResults = el('div', { id: 'weather-city-results', className: 'rows', ariaLive: 'polite' });
+    $('weatherSettings').replaceChildren(
+      el('h3', { textContent: 'Местоположение' }),
+      el('p', { className: 'section-help', textContent: 'Найдите город или укажите его координаты вручную.' }),
+      citySearch, cityResults,
+      el('div', { className: 'rows' }, [
+        field('Город', locName), field('Широта', lat), field('Долгота', lon),
+        field('Ключ OpenWeatherMap', key),
+        weatherSelect('weather-temp-unit', 'Температура', weatherSettings.tempUnit, [[0, '°C'], [1, '°F']]),
+        weatherSelect('weather-wind-unit', 'Скорость ветра', weatherSettings.windUnit,
+          [[0, 'км/ч'], [1, 'м/с'], [2, 'мили/ч'], [3, 'узлы']]),
+        weatherSelect('weather-precip-unit', 'Осадки', weatherSettings.precipUnit, [[0, 'мм'], [1, 'дюймы']])]),
+      el('p', { className: 'section-help', textContent: weatherSettings.apiKeyConfigured
+        ? 'Ключ не передаётся в браузер. Пустое поле оставляет сохранённый ключ без изменений.'
+        : 'Ключ необязателен: прогноз может использовать источник Open-Meteo.' }),
+      el('div', { className: 'item-actions' }, [
+        el('button', { type: 'button', className: 'btn', textContent: 'Очистить местоположение', onclick: clearWeatherLocation }),
+        weatherSettings.apiKeyConfigured ? el('button', { type: 'button', className: 'btn', textContent: 'Удалить ключ', onclick: clearWeatherApiKey }) : null,
+        el('button', { type: 'button', className: 'btn btn-primary', textContent: 'Сохранить погоду', onclick: saveWeatherSettings })]));
+  }
+
+  async function loadWeather() {
+    try {
+      const r = await fetch('/api/weather-settings');
+      if (!r.ok) throw new Error(r.status);
+      weatherSettings = await r.json();
+      renderWeather();
+    } catch (e) {
+      $('weatherSettings').replaceChildren(el('p', { className: 'empty', textContent: 'Настройки погоды недоступны: ' + e.message }));
+    }
+  }
+
+  async function searchWeatherCities() {
+    const query = $('weather-city-query').value.trim();
+    const results = $('weather-city-results');
+    if (!query) { toast('Введите название города.', true); return; }
+    results.replaceChildren(el('p', { className: 'section-help', textContent: 'Ищем город…' }));
+    try {
+      const r = await fetch('/api/weather-cities?q=' + encodeURIComponent(query));
+      if (!r.ok) throw new Error((await r.text()) || r.status);
+      const cities = await r.json();
+      if (!cities.length) {
+        results.replaceChildren(el('p', { className: 'empty', textContent: 'Подходящие города не найдены.' }));
+        return;
+      }
+      results.replaceChildren(...cities.map((city) => el('button', {
+        type: 'button', className: 'btn', textContent: [city.name, city.region, city.country].filter(Boolean).join(', '),
+        onclick: () => {
+          $('weather-location-name').value = city.name;
+          $('weather-latitude').value = Number(city.latitude).toFixed(4);
+          $('weather-longitude').value = Number(city.longitude).toFixed(4);
+          $('weather-city-results').replaceChildren();
+        }
+      })));
+    } catch (e) {
+      results.replaceChildren(el('p', { className: 'empty', textContent: 'Не удалось найти город: ' + e.message }));
+    }
+  }
+
+  async function saveWeatherSettings() {
+    const next = {
+      tempUnit: Number($('weather-temp-unit').value), windUnit: Number($('weather-wind-unit').value),
+      precipUnit: Number($('weather-precip-unit').value)
+    };
+    const name = $('weather-location-name').value.trim();
+    const latText = $('weather-latitude').value.trim(), lonText = $('weather-longitude').value.trim();
+    if (weatherSettings.locationConfigured || name || latText || lonText) {
+      if (!latText || !lonText) { toast('Укажите широту и долготу.', true); return; }
+      next.locationName = name;
+      next.latitude = Number(latText);
+      next.longitude = Number(lonText);
+    }
+    const key = $('weather-api-key').value.trim();
+    if (key) next.apiKey = key;
+    try {
+      await post('/api/weather-settings', next);
+      $('weather-api-key').value = '';
+      toast('Настройки погоды сохранены.');
+      await loadWeather();
+    } catch (e) { toast('Не удалось сохранить настройки погоды: ' + e.message, true); }
+  }
+
+  async function clearWeatherLocation() {
+    if (!confirm('Очистить местоположение погоды?')) return;
+    try { await post('/api/weather-settings', { clearLocation: true }); toast('Местоположение очищено.'); await loadWeather(); }
+    catch (e) { toast('Не удалось очистить местоположение: ' + e.message, true); }
+  }
+
+  async function clearWeatherApiKey() {
+    if (!confirm('Удалить сохранённый ключ OpenWeatherMap?')) return;
+    try { await post('/api/weather-settings', { clearApiKey: true }); toast('Ключ удалён.'); await loadWeather(); }
+    catch (e) { toast('Не удалось удалить ключ: ' + e.message, true); }
+  }
+
   function wifiCard(net, idx) {
     const id = idx < 0 ? 'new' : String(idx);
     const save = async () => {
@@ -697,6 +835,7 @@
   // broken one cannot hold up the settings.
   (async () => {
     await loadSettings();
+    await loadWeather();
     await loadWifi();
     await loadOpds();
     await loadPlugins('settings');
