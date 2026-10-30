@@ -1839,6 +1839,8 @@ int FileBrowserActivity::listCount() const {
 void FileBrowserActivity::startLibraryBuildIfStale() {
   if (model.getMode() != Mode::Added && model.getMode() != Mode::Authors) return;
   if (libraryBuilder || !LibraryFreshness::stale(model.index())) return;
+  // The walk's per-book metadata signature selectively invalidates FB2 author results. Other
+  // formats keep their existing authors instead of being needlessly parsed again.
   startLibraryBuild(/*resolveAll=*/false);
 }
 

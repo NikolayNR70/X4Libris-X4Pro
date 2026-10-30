@@ -2,6 +2,7 @@
 
 #include <Epub.h>
 #include <Epub/MetadataSidecar.h>
+#include <Fb2Converter.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <SidecarFiles.h>
@@ -13,7 +14,13 @@
 namespace {
 
 // details.bin sits with the book's other cache files, whatever its format.
-std::string detailsPath(const std::string& bookPath) { return ReaderActivity::bookCacheDir(bookPath) + "/details.bin"; }
+std::string detailsPath(const std::string& bookPath) {
+  const std::string cacheDir = ReaderActivity::bookCacheDir(bookPath);
+  // Earlier firmware revisions cached FB2/ZIP details from the .opf sidecar only under details.bin.
+  // Keep that stale empty result from masking the new metadata parser without invalidating every
+  // other format's otherwise-current details cache.
+  return cacheDir + (FsHelpers::hasFb2Extension(bookPath) ? "/details-fb2-v2.bin" : "/details.bin");
+}
 
 // The sidecar over what the book said of itself, field by field: an empty sidecar field leaves the
 // book's own. False when the sidecar is there but could not be read just now -- for want of memory,
@@ -44,7 +51,7 @@ namespace BookDetailsLookup {
 bool cached(const std::string& bookPath, const uint32_t bookSize, BookDetails& out) {
   // A TXT or Markdown book says nothing about itself: without a sidecar there is nothing to look up,
   // and the view titles it by its filename. An existence probe, not the sidecar's hash.
-  const bool describesItself = FsHelpers::hasEpubExtension(bookPath) ||
+  const bool describesItself = FsHelpers::hasFb2Extension(bookPath) || FsHelpers::hasEpubExtension(bookPath) ||
                                FsHelpers::hasXtcExtension(bookPath);
   if (!describesItself && SidecarFiles::metadataPath(bookPath).empty()) {
     out = {};
@@ -58,7 +65,13 @@ bool cached(const std::string& bookPath, const uint32_t bookSize, BookDetails& o
 
 bool parse(const std::string& bookPath, const uint32_t bookSize, BookDetails& out, BuildArena* scratch) {
   out = {};
-  if (FsHelpers::hasEpubExtension(bookPath)) {
+  if (FsHelpers::hasFb2Extension(bookPath)) {
+    std::string error;
+    if (!Fb2Converter::readMetadata(bookPath, out.title, out.author, out.series, out.seriesIndex, error)) return false;
+    out.primaryAuthor = out.author;
+    if (!applySidecar(bookPath, out)) return false;
+    Txt(bookPath, "/.crosspoint").setupCacheDir();
+  } else if (FsHelpers::hasEpubExtension(bookPath)) {
     Epub epub(bookPath, "/.crosspoint");
     // Past book.bin, which keeps no primary author: one OPF parse per book, then details.bin has it.
     // The .opf sidecar is applied by the load.

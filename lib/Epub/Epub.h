@@ -50,6 +50,10 @@ class Epub {
   // files. It does not pass through an EPUB archive or change the source path.
   bool directFb2_ = false;
   Fb2Converter::ReaderBook fb2ReaderBook_;
+  // Direct FB2 has no serialized spine table, so keep generated chapter sizes
+  // once per open instead of reopening all preceding XHTML files whenever a
+  // cumulative size is requested for progress or chapter-span calculations.
+  std::vector<uint32_t> directFb2CumulativeSizes_;
   mutable TocReliability tocReliability = TocReliability::Unknown;
   // Library-level option: app code can override this per-book instance.
   bool syntheticTocFallbackEnabled = false;
@@ -136,9 +140,10 @@ class Epub {
   void applyMetadataSidecar() const;
 
  public:
-  explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
-    // create a cache key based on the filepath
-    cachePath = cacheDir + "/tmp/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
+  explicit Epub(std::string filepath, const std::string& /*cacheDir*/) : filepath(std::move(filepath)) {
+    // Create a filepath key in a bounded FAT directory bucket.
+    const size_t hash = std::hash<std::string>{}(this->filepath);
+    cachePath = FsHelpers::unpackCachePath("epub_" + std::to_string(hash), static_cast<uint32_t>(hash));
   }
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }

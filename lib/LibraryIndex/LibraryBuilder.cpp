@@ -4,6 +4,7 @@
 #include <ProtectedPaths.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <utility>
@@ -38,6 +39,31 @@ uint32_t stemHash(const char* name) {
 bool isMetadataSidecar(const char* name) {
   const size_t len = std::strlen(name);
   return len > 4 && (std::strcmp(name + len - 4, ".opf") == 0 || std::strcmp(name + len - 4, ".OPF") == 0);
+}
+
+bool endsWithIgnoreCase(const char* name, const char* suffix) {
+  const size_t nameLen = std::strlen(name);
+  const size_t suffixLen = std::strlen(suffix);
+  if (nameLen < suffixLen) return false;
+  const char* tail = name + nameLen - suffixLen;
+  for (size_t i = 0; i < suffixLen; ++i) {
+    if (std::tolower(static_cast<unsigned char>(tail[i])) != std::tolower(static_cast<unsigned char>(suffix[i])))
+      return false;
+  }
+  return true;
+}
+
+// Only invalidate stored author results for FB2 sources when their parser changes. EPUB, XTC and
+// sidecar-only formats keep their indexed authors; every name is resolved during the same bounded
+// background pass instead of forcing an expensive whole-library metadata refresh.
+uint32_t metadataSignature(const char* name, const uint32_t sidecarSig) {
+  if (sidecarSig == library::SIDECAR_UNKNOWN ||
+      !(endsWithIgnoreCase(name, ".fb2") || endsWithIgnoreCase(name, ".zip") || endsWithIgnoreCase(name, ".fbz")))
+    return sidecarSig;
+  const uint8_t revision = library::BOOK_METADATA_REVISION;
+  uint32_t sig = fnv1a(fnv1a(FNV_BASIS, &sidecarSig, sizeof(sidecarSig)), &revision, sizeof(revision));
+  if (sig == library::SIDECAR_NONE || sig == library::SIDECAR_UNKNOWN) sig = 1;
+  return sig;
 }
 
 // The later of an entry's modified and created times, as FAT (date << 16) | time.
@@ -138,7 +164,8 @@ bool LibraryBuilder::stageBook(const Level& level, HalFile& entry) {
   const std::string path = childPath(level.path, name_);
   if (path.size() > library::MAX_STRING) return true;  // a path the index cannot hold is left out
   const auto size = static_cast<uint32_t>(entry.fileSize());
-  const library::StagedBook book{LibraryKeys::bookIdentity(name_, size), packDate(entry), sidecarFor(level),
+  const library::StagedBook book{LibraryKeys::bookIdentity(name_, size), packDate(entry),
+                                 metadataSignature(name_, sidecarFor(level)),
                                  pathsBytes_};
   if (!library::writeBlobString(paths_, path) || !library::writeExact(stage_, &book, sizeof(book))) return false;
   pathsBytes_ += static_cast<uint32_t>(sizeof(uint16_t) + path.size());

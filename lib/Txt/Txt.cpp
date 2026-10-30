@@ -8,11 +8,10 @@
 #include <Logging.h>
 #include <PngToBmpConverter.h>
 
-Txt::Txt(std::string path, std::string cacheBasePath)
-    : filepath(std::move(path)), cacheBasePath(std::move(cacheBasePath)) {
+Txt::Txt(std::string path, std::string /*cacheBasePath*/) : filepath(std::move(path)) {
   // Generate cache path from file path hash
   const size_t hash = std::hash<std::string>{}(filepath);
-  cachePath = this->cacheBasePath + "/tmp/txt_" + std::to_string(hash);
+  cachePath = FsHelpers::bookCachePath("txt_" + std::to_string(hash), static_cast<uint32_t>(hash));
 }
 
 bool Txt::load() {

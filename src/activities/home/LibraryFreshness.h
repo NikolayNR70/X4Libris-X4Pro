@@ -10,7 +10,7 @@ namespace LibraryFreshness {
 
 // True when there is no valid index, the card changed since the last finished build -- in this boot or
 // an earlier one (HalStorage::contentChangedSinceMark) -- or the index was built under the other
-// hidden-files setting. A boot or a wake on its own is no reason: the index lives on its card.
+// hidden-files setting or metadata resolver revision. A boot or a wake on its own is no reason: the index lives on its card.
 bool stale(const LibraryIndexReader& index);
 
 // A build that started at `generationAtStart` (HalStorage::contentGeneration) has finished. With no

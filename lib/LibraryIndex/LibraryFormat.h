@@ -34,6 +34,8 @@ constexpr uint8_t ACCEPT_RULES_REVISION = 1;
 constexpr uint8_t acceptRules(const bool showHidden) {
   return static_cast<uint8_t>((ACCEPT_RULES_REVISION << 1) | (showHidden ? 1 : 0));
 }
+// The header's formerly reserved byte tracks metadata resolver changes independently of walk rules.
+constexpr uint8_t BOOK_METADATA_REVISION = 3;
 
 // Where the index and a build's working files live on the card.
 constexpr const char* DIR = "/.crosspoint/library";
@@ -45,7 +47,7 @@ struct Header {
   uint8_t version;
   uint8_t flags;
   uint8_t acceptRules;  // acceptRules() of the walk: another value lists other books
-  uint8_t reserved;
+  uint8_t metadataRevision;  // 0 in existing indexes; rebuild and resolve authors when this changes
   uint32_t buildGen;
   uint16_t bookCount;
   uint16_t authorCount;

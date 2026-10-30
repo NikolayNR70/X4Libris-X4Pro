@@ -248,6 +248,7 @@ bool writeIndex(const LibraryPublish::Input& in, const std::string& tmpPath, con
   header.version = library::VERSION;
   header.flags = in.partial ? library::FLAG_PARTIAL : 0;
   header.acceptRules = in.acceptRules;
+  header.metadataRevision = library::BOOK_METADATA_REVISION;
   header.buildGen = in.buildGen;
   header.bookCount = in.bookCount;
   header.authorCount = t.authors;

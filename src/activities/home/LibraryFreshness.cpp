@@ -17,7 +17,8 @@ bool stale(const LibraryIndexReader& index) {
   LibraryStaleness::Facts facts;
   facts.indexValid = index.isOpen();
   facts.sameHiddenRule =
-      facts.indexValid && index.header().acceptRules == library::acceptRules(SETTINGS.showHiddenFiles);
+      facts.indexValid && index.header().acceptRules == library::acceptRules(SETTINGS.showHiddenFiles) &&
+      index.header().metadataRevision == library::BOOK_METADATA_REVISION;
   facts.cardChanged = Storage.contentChangedSinceMark();
   return LibraryStaleness::rebuildNeeded(facts);
 }

@@ -30,6 +30,11 @@ struct ReaderBook {
   std::vector<ReaderImage> images;
 };
 
+// Reads only FictionBook title, first author, and first title-info sequence. A ZIP/FBZ source must
+// contain exactly one .fb2 entry. Does not create the reader's rendered cache.
+bool readMetadata(const std::string& source, std::string& title, std::string& author, std::string& series,
+                  std::string& seriesIndex, std::string& error);
+
 // Parses the original FB2 and writes only private renderer cache files (XHTML
 // sections, images, stylesheet and index) under /.crosspoint. It never creates
 // a sibling EPUB or renames/hides the source book.

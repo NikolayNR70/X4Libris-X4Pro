@@ -360,9 +360,9 @@ u8  hasVisibleOffset
 
 The file is exactly `47 + xpathLen` bytes; anything else reads as no cached push. Only a push that carried the page's visible-text offset is recorded; any other push removes the file, so it always holds the last push or nothing.
 
-## `details.bin`
+## Book metadata cache
 
-What the Library's book lists show for a book (`BookDetailsCache` in `src/activities/home/BookDetailsCache.cpp`, `BookDetails.h`), in the book's cache directory whatever its format:
+What the Library's book lists show for a book (`BookDetailsCache` in `src/activities/home/BookDetailsCache.cpp`, `BookDetails.h`), in the book's cache directory whatever its format. Non-FB2 formats use `details.bin`; FB2 and FB2 ZIP/FBZ use `details-fb2-v2.bin` so the metadata parser's title/author/series fields bypass older FB2 records without forcing all other books to be re-read:
 
 ```text
 u8  version             BookDetailsCache VERSION (3)
@@ -378,7 +378,7 @@ String isbn             the first dc:identifier that is an ISBN, without its pre
 String asin             the first that is an Amazon ASIN; may be empty
 ```
 
-A file of another version, or recorded for another book size or sidecar stamp, is ignored and the book read again (`BookDetailsLookup::parse`): an EPUB's OPF (never `book.bin`, which keeps no primary author), an XTC's header, and for every format the `.opf` sidecar over it. An EPUB whose parse failed is not recorded. Version 2 added `primaryAuthor` and `authorSort`; version 3 `isbn` and `asin`, which KOReader sync sends with **Send Document Metadata** (`KOReaderSyncMetadata::forBook`).
+A file of another version, or recorded for another book size or sidecar stamp, is ignored and the book read again (`BookDetailsLookup::parse`): an EPUB's OPF (never `book.bin`, which keeps no primary author), an FB2 file or a ZIP/FBZ containing exactly one FB2 document, an XTC's header, and for every format the `.opf` sidecar over it. FB2 metadata includes the first `title-info/sequence` name and number. ZIP/FBZ metadata lookup inflates only the first 128 KiB into a temporary prefix (or the complete entry when smaller); it stops after `title-info`, removes the prefix, and does not build the reader's rendered cache. Small complete ZIP entries are CRC-checked; larger ones are not traversed just to verify the whole-entry CRC during metadata lookup. An EPUB or FB2 parse that fails is not recorded, so a later build can retry. Version 2 added `primaryAuthor` and `authorSort`; version 3 `isbn` and `asin`, which KOReader sync sends with **Send Document Metadata** (`KOReaderSyncMetadata::forBook`).
 
 ## Cover thumbnails
 
@@ -399,7 +399,7 @@ that do not fit the file, make it invalid, and a build replaces it.
 
 | Section | Layout |
 |---|---|
-| Header, 48 B | magic `WLIB`; `u8` version (3); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (bit 0: the *Show Hidden Files* setting the walk used; bits 1-7: the revision of the folders the walk always leaves out, now 1); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length; `u32` newestDate, the newest date among the books and the folders the walk listed (0 for none) |
+| Header, 48 B | magic `WLIB`; `u8` version (3); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (bit 0: the *Show Hidden Files* setting the walk used; bits 1-7: the revision of the folders the walk always leaves out, now 1); `u8` metadataRevision (0 in old indexes; 3 re-resolves FB2 author and series metadata); `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length; `u32` newestDate, the newest date among the books and the folders the walk listed (0 for none) |
 | Records | bookCount × 24 B, **in identity order**: `u32` identity, authorHash, date (FAT `date << 16 \| time`), pathOff, sidecarSig, firstSeen |
 | New | newCount (≤ 10) × `u16` record index, newest first |
 | Authors | authorCount × 12 B, **in sort-key order**: `u32` hash, nameOff; `u16` firstBook, count |

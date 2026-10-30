@@ -9,10 +9,10 @@ class BuildArena;
 // its .opf sidecar) gives them rather than as the filename spells them, and the author the Library
 // groups it by.
 //
-// Getting them costs a metadata-only OPF parse (~300 ms on the device) for an EPUB and a header read
-// for an XTC; a TXT or Markdown book has only its sidecar, if any. The result is kept beside the
-// book's other cache files as details.bin, so after the first time every book on the card is a
-// small file read away.
+// Getting them costs a metadata-only OPF parse (~300 ms on the device) for an EPUB, an FB2 XML parse
+// through title-info (including one FB2 entry from ZIP/FBZ) for FB2, and a header read for an XTC; a
+// TXT or Markdown book has only its sidecar, if any. The result is kept beside the book's other cache
+// files, so after the first time every book on the card is a small file read away.
 struct BookDetails {
   std::string title;
   std::string author;         // every author the book credits, for display

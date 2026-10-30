@@ -142,7 +142,7 @@ struct Writer {
 };
 
 struct Converter {
-  std::string dir, error, title, author, language = "ru", cover, embeddedCss;
+  std::string dir, error, title, author, series, seriesIndex, language = "ru", cover, embeddedCss;
   std::vector<Chapter> chapters;
   std::vector<Anchor> anchors;
   std::vector<Image> images;
@@ -161,11 +161,13 @@ struct Converter {
   Writer out;
   size_t chapter = 0, nextChapter = 0;
   int bodyDepth = 0, sectionDepth = 0, titleInfoDepth = 0, binary = -1;
-  bool render = false, active = false, root = false, note = false, coverPage = false, capturingStylesheet = false;
+  int metadataAuthorDepth = 0;
+  bool render = false, metadataOnly = false, metadataComplete = false, active = false, root = false, note = false, coverPage = false,
+       capturingStylesheet = false;
   unsigned b64 = 0;
   int bits = 0, padding = 0;
   size_t binaryBytes = 0;
-  std::string capture, captured;
+  std::string capture, captured, metadataName, metadataNickname;
 
   void fail(const char* e) {
     if (error.empty()) error = e;
@@ -242,6 +244,33 @@ struct Converter {
   static void charCb(void* p, const char* s, int n) { static_cast<Converter*>(p)->chars(s, n); }
   void start(const std::string& n, const char** a) {
     if (!error.empty()) return;
+    if (metadataOnly) {
+      if (stack.empty()) {
+        root = n == "FictionBook";
+        if (!root) fail("This is not a FictionBook document");
+      }
+      Frame f;
+      f.name = n;
+      if (n == "title-info") titleInfoDepth = static_cast<int>(stack.size()) + 1;
+      if (titleInfoDepth && n == "sequence" && series.empty()) {
+        series = attr(a, "name");
+        seriesIndex = attr(a, "number");
+      }
+      if (titleInfoDepth && n == "author" && metadataAuthorDepth == 0 && author.empty()) {
+        metadataAuthorDepth = static_cast<int>(stack.size()) + 1;
+        metadataName.clear();
+        metadataNickname.clear();
+      }
+      if (titleInfoDepth &&
+          (n == "book-title" || n == "lang" ||
+           (metadataAuthorDepth &&
+            (n == "first-name" || n == "middle-name" || n == "last-name" || n == "nickname")))) {
+        capture = n;
+        captured.clear();
+      }
+      stack.push_back(std::move(f));
+      return;
+    }
     if (!stack.empty() && stack.back().deferredParagraph) {
       // A number of FB2 books encode chapter subtitles as consecutive paragraphs
       // whose only child is <strong>. Defer their opening tag until the first child
@@ -401,6 +430,36 @@ struct Converter {
   }
   void end() {
     if (stack.empty() || !error.empty()) return;
+    if (metadataOnly) {
+      const auto name = stack.back().name;
+      if (name == capture && titleInfoDepth) {
+        auto first = captured.find_first_not_of(" \t\r\n");
+        auto last = captured.find_last_not_of(" \t\r\n");
+        const std::string value = first == std::string::npos ? std::string{} : captured.substr(first, last - first + 1);
+        if (capture == "book-title") {
+          title = value;
+        } else if (capture == "lang") {
+          language = value;
+        } else if (capture == "nickname") {
+          metadataNickname = value;
+        } else if (!value.empty()) {
+          if (!metadataName.empty()) metadataName += ' ';
+          metadataName += value;
+        }
+        capture.clear();
+        captured.clear();
+      }
+      if (name == "author" && static_cast<int>(stack.size()) == metadataAuthorDepth) {
+        author = metadataName.empty() ? metadataNickname : metadataName;
+        metadataAuthorDepth = 0;
+      }
+      if (name == "title-info") {
+        titleInfoDepth = 0;
+        metadataComplete = true;
+      }
+      stack.pop_back();
+      return;
+    }
     if (stack.back().deferredParagraph) openDeferredParagraph(false);
     const auto f = stack.back();
     if (f.name == capture && titleInfoDepth) {
@@ -444,6 +503,11 @@ struct Converter {
   }
   void chars(const char* s, int n) {
     if (!error.empty()) return;
+    if (metadataOnly) {
+      if (!capture.empty() && captured.size() < 2048)
+        captured.append(s, std::min<size_t>(n, 2048 - captured.size()));
+      return;
+    }
     if (render && binary >= 0) {
       for (int i = 0; i < n; ++i) {
         const unsigned char c = s[i];
@@ -646,7 +710,14 @@ bool parse(Converter& c, HalFile& src, uint32_t* sourceCrc = nullptr, uint32_t* 
       return false;
     }
     if (!c.error.empty()) return false;
+    // For the Library's metadata-only lookup, title-info precedes the potentially huge book body.
+    // Stop there instead of scanning every chapter and embedded base64 image on every index refresh.
+    if (c.metadataOnly && c.metadataComplete) break;
     delay(1);
+  }
+  if (c.metadataOnly) {
+    if (!c.root || !c.metadataComplete) c.fail("FB2 metadata section is missing or incomplete");
+    return c.error.empty();
   }
   if (pendingHighSurrogate) {
     c.fail("Malformed UTF-16 FB2: incomplete surrogate pair");
@@ -1019,7 +1090,143 @@ bool extractFb2Archive(const std::string& archivePath, const std::string& destin
   }
   return true;
 }
+
+// Metadata is in FB2's opening title-info section. Read at most this prefix from ZIP/FBZ rather than
+// inflating the entire book and writing it to the SD card just to discover its author.
+bool extractFb2MetadataPrefix(const std::string& archivePath, const std::string& destination, uint32_t& size,
+                              std::string& error) {
+  constexpr size_t METADATA_PREFIX_LIMIT = 128u * 1024;
+  ZipFile zip(archivePath);
+  std::string entryName;
+  bool multiple = false;
+  if (!zip.streamCentralDirectoryNames([&](std::string_view name) {
+        if (!isFb2Entry(name)) return;
+        if (!entryName.empty())
+          multiple = true;
+        else
+          entryName.assign(name.data(), name.size());
+      })) {
+    error = "Cannot read FB2 ZIP directory";
+    return false;
+  }
+  if (multiple || entryName.empty()) {
+    error = multiple ? "FB2 ZIP contains more than one .fb2 book" : "FB2 ZIP contains no .fb2 file";
+    return false;
+  }
+
+  ZipFile::FileStatSlim stat{};
+  if (!zip.loadFileStatSlim(entryName.c_str(), &stat) || stat.uncompressedSize == 0 ||
+      stat.uncompressedSize > 128u * 1024 * 1024) {
+    error = "FB2 ZIP entry is missing, empty, or larger than 128 MB";
+    return false;
+  }
+  const bool wholeEntryFits = stat.uncompressedSize <= METADATA_PREFIX_LIMIT;
+  ZipFile::EntryReader reader(zip, 1024);
+  if (!reader.open(stat, METADATA_PREFIX_LIMIT, wholeEntryFits)) {
+    error = "Cannot open compressed FB2 entry";
+    return false;
+  }
+  Writer out;
+  if (!out.open(destination)) {
+    error = "Cannot create temporary FB2 metadata prefix";
+    reader.close();
+    return false;
+  }
+  uint8_t buffer[1024];
+  size = 0;
+  bool done = false;
+  bool ok = true;
+  while (!done) {
+    size_t produced = 0;
+    if (!reader.step(buffer, sizeof(buffer), &produced, &done)) {
+      ok = false;
+      break;
+    }
+    out.bytes(buffer, produced);
+    size += static_cast<uint32_t>(produced);
+  }
+  if (!out.close()) ok = false;
+  reader.close();
+  const uint32_t expectedSize = static_cast<uint32_t>(std::min<size_t>(stat.uncompressedSize, METADATA_PREFIX_LIMIT));
+  if (!ok || size != expectedSize || size == 0) {
+    Storage.remove(destination.c_str());
+    error = "Could not read the FB2 metadata prefix";
+    return false;
+  }
+  // A complete small entry was CRC-checked. For larger books only the prefix is read, so their full
+  // entry CRC is intentionally not traversed during a metadata lookup.
+  return true;
+}
 }  // namespace
+
+bool Fb2Converter::readMetadata(const std::string& source, std::string& title, std::string& author,
+                                std::string& series, std::string& seriesIndex, std::string& error) {
+  title.clear();
+  author.clear();
+  series.clear();
+  seriesIndex.clear();
+  error.clear();
+
+  const bool zippedFb2 = endsWithIgnoreCase(source, ".zip") || endsWithIgnoreCase(source, ".fbz");
+  if (!zippedFb2 && !endsWithIgnoreCase(source, ".fb2")) {
+    error = "Invalid FB2 source extension";
+    return false;
+  }
+
+  HalFile sourceFile;
+  if (!Storage.openFileForRead("FB2META", source, sourceFile)) {
+    error = "Cannot open FB2";
+    return false;
+  }
+  if (sourceFile.size() > 128u * 1024 * 1024) {
+    error = "FB2 exceeds the 128 MB limit";
+    return false;
+  }
+
+  HalFile extractedSource;
+  HalFile* parseSource = &sourceFile;
+  std::string extractedPath;
+  if (zippedFb2) {
+    if (!Storage.ensureDirectoryExists("/.crosspoint/tmp")) {
+      error = "Cannot prepare temporary FB2 folder";
+      return false;
+    }
+    char name[96];
+    snprintf(name, sizeof(name), "/.crosspoint/tmp/fb2-meta-%08lx-%08lx.fb2",
+             static_cast<unsigned long>(std::hash<std::string>{}(source)), static_cast<unsigned long>(millis()));
+    extractedPath = name;
+    uint32_t extractedSize = 0;
+    if (!extractFb2MetadataPrefix(source, extractedPath, extractedSize, error) ||
+        !Storage.openFileForRead("FB2META", extractedPath, extractedSource)) {
+      if (error.empty()) error = "Cannot reopen temporary FB2 source";
+      Storage.remove(extractedPath.c_str());
+      return false;
+    }
+    parseSource = &extractedSource;
+  }
+
+  auto converter = std::unique_ptr<Converter>(new (std::nothrow) Converter);
+  if (!converter) {
+    error = "Not enough memory for FB2 metadata";
+  } else {
+    converter->metadataOnly = true;
+    const bool ok = parse(*converter, *parseSource);
+    if (!ok || !converter->root) {
+      error = converter->error.empty() ? "Cannot parse FB2 metadata" : converter->error;
+    } else {
+      title = converter->title;
+      author = converter->author;
+      series = converter->series;
+      seriesIndex = converter->seriesIndex;
+    }
+  }
+
+  if (zippedFb2) {
+    extractedSource.close();
+    Storage.remove(extractedPath.c_str());
+  }
+  return error.empty();
+}
 
 bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& book, std::string& error) {
   book = {};
@@ -1049,10 +1256,11 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
   const uint32_t archiveSize = book.sourceSize;
   const uint32_t archiveCrc = book.sourceCrc;
 
-  char key[80];
-  snprintf(key, sizeof(key), "/.crosspoint/tmp/fb2-reader-v3-%08lx-%08lx",
-           static_cast<unsigned long>(std::hash<std::string>{}(source)), static_cast<unsigned long>(book.sourceCrc));
-  book.cacheDir = key;
+  const size_t sourceHash = std::hash<std::string>{}(source);
+  char key[64];
+  snprintf(key, sizeof(key), "fb2-reader-v3-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
+           static_cast<unsigned long>(book.sourceCrc));
+  book.cacheDir = FsHelpers::unpackCachePath(key, static_cast<uint32_t>(sourceHash));
   if (!FsHelpers::prepareBookCachePath(book.cacheDir)) {
     error = "Cannot prepare FB2 cache folder on SD card";
     return false;

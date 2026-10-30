@@ -34,6 +34,7 @@ std::string KOReaderDocumentId::getLearnedMethodFilePath(const std::string& file
 }
 
 std::optional<DocumentMatchMethod> KOReaderDocumentId::loadLearnedMatchMethod(const std::string& filePath) {
+  FsHelpers::prepareBookCachePath(bookCacheDir(filePath));
   std::string path = getLearnedMethodFilePath(filePath);
   if (!Storage.exists(path.c_str()) && KOReaderCachePath::isFb2Book(filePath)) {
     // Older builds stored FB2 sync metadata under epub_<hash>. Read it once for
@@ -63,7 +64,7 @@ std::optional<DocumentMatchMethod> KOReaderDocumentId::loadLearnedMatchMethod(co
 
 void KOReaderDocumentId::saveLearnedMatchMethod(const std::string& filePath, const DocumentMatchMethod method) {
   const std::string path = getLearnedMethodFilePath(filePath);
-  Storage.ensureDirectoryExists(bookCacheDir(filePath).c_str());
+  FsHelpers::prepareBookCachePath(bookCacheDir(filePath));
   const String content(method == DocumentMatchMethod::BINARY ? "1" : "0");
   if (!Storage.writeFile(path.c_str(), content)) {
     LOG_DBG("KODoc", "Failed to write learned sync method to %s", path.c_str());
@@ -243,6 +244,7 @@ std::string KOReaderDocumentId::calculate(const std::string& filePath) {
 
   // Return persisted hash if the file size and fingerprint haven't changed.
   const std::string cacheFilePath = getCacheFilePath(filePath);
+  FsHelpers::prepareBookCachePath(bookCacheDir(filePath));
   std::string cached = loadCachedHash(cacheFilePath, fileSize, fingerprintTok);
   if (cached.empty() && KOReaderCachePath::isFb2Book(filePath)) {
     const std::string legacyCachePath = legacyBookCacheDir(filePath) + "/koreader_docid.txt";

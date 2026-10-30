@@ -2,26 +2,58 @@
 
 #include <HalStorage.h>
 
+#include <cstdint>
+#include <cstdio>
+#include <initializer_list>
 #include <string>
 
 namespace FsHelpers {
 
 inline constexpr char BOOK_CACHE_ROOT[] = "/.crosspoint/tmp";
+inline constexpr char UNPACK_CACHE_ROOT[] = "/.crosspoint/unpack";
+
+// Keep per-book folders out of one FAT directory. Library indexing may create one cache folder
+// per book; a flat directory makes every later cache lookup scan an ever-growing list of entries.
+inline std::string bookCachePath(const std::string& leaf, const uint32_t shardKey) {
+  char shard[3];
+  std::snprintf(shard, sizeof(shard), "%02x", static_cast<unsigned>(shardKey & 0xffu));
+  return std::string(BOOK_CACHE_ROOT) + "/" + shard + "/" + leaf;
+}
+
+inline std::string unpackCachePath(const std::string& leaf, const uint32_t shardKey) {
+  char shard[3];
+  std::snprintf(shard, sizeof(shard), "%02x", static_cast<unsigned>(shardKey & 0xffu));
+  return std::string(UNPACK_CACHE_ROOT) + "/" + shard + "/" + leaf;
+}
 
 inline bool prepareBookCachePath(const std::string& newPath) {
-  if (!Storage.ensureDirectoryExists(BOOK_CACHE_ROOT)) return false;
+  const std::string cacheRoot = newPath.compare(0, sizeof(UNPACK_CACHE_ROOT) - 1, UNPACK_CACHE_ROOT) == 0
+                                    ? UNPACK_CACHE_ROOT
+                                    : BOOK_CACHE_ROOT;
+  if (!Storage.ensureDirectoryExists(cacheRoot.c_str())) return false;
 
-  constexpr char prefix[] = "/.crosspoint/tmp/";
-  constexpr size_t prefixLength = sizeof(prefix) - 1;
-  if (newPath.compare(0, prefixLength, prefix) != 0 || Storage.exists(newPath.c_str())) return true;
+  const std::string prefix = cacheRoot + "/";
+  const size_t prefixLength = prefix.size();
+  if (newPath.compare(0, prefixLength, prefix) != 0) return true;
 
-  const std::string legacyPath = std::string("/.crosspoint/") + newPath.substr(prefixLength);
-  if (!Storage.exists(legacyPath.c_str())) return true;
+  // Layouts: /.crosspoint/tmp/<bucket>/<book> and /.crosspoint/unpack/<bucket>/<book>.
+  // mkdir() is one level only, so create each level in order.
+  const size_t bucketEnd = newPath.find('/', prefixLength);
+  if (bucketEnd == std::string::npos || bucketEnd == prefixLength || bucketEnd + 1 >= newPath.size()) return true;
+  const std::string bucketPath = newPath.substr(0, bucketEnd);
+  if (!Storage.ensureDirectoryExists(bucketPath.c_str())) return false;
+  if (Storage.exists(newPath.c_str())) return true;
 
-  // Move the whole cache so progress, bookmarks, sync IDs and rendered pages survive
-  // the one-time relocation. Never replace anything already at the destination.
-  if (Storage.renameNoReplace(legacyPath.c_str(), newPath.c_str())) return true;
-  return Storage.exists(newPath.c_str());
+  const std::string leaf = newPath.substr(bucketEnd + 1);
+  // Migrate both earlier layouts lazily, preserving progress, bookmarks and rendered pages.
+  const std::string flatPath = std::string(BOOK_CACHE_ROOT) + "/" + leaf;
+  const std::string legacyPath = std::string("/.crosspoint/") + leaf;
+  for (const std::string& candidate : {flatPath, legacyPath}) {
+    if (!Storage.exists(candidate.c_str())) continue;
+    if (Storage.renameNoReplace(candidate.c_str(), newPath.c_str())) return true;
+    if (Storage.exists(newPath.c_str())) return true;
+  }
+  return true;
 }
 
 }  // namespace FsHelpers

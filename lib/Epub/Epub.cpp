@@ -699,6 +699,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena
   tocReliability = TocReliability::Unknown;
 
   directFb2_ = FsHelpers::hasFb2Extension(std::string_view(filepath));
+  directFb2CumulativeSizes_.clear();
   if (directFb2_) {
     std::string error;
     if (fb2ReaderBook_.cacheDir.empty() && !Fb2Converter::prepareReaderCache(filepath, fb2ReaderBook_, error)) {
@@ -711,6 +712,21 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena
     // Keeping layout data beside the FB2 reader cache also makes clearing this
     // book's generated data a single-format operation.
     cachePath = fb2ReaderBook_.cacheDir;
+    directFb2CumulativeSizes_.reserve(fb2ReaderBook_.chapters.size());
+    uint32_t cumulativeSize = 0;
+    for (size_t i = 0; i < fb2ReaderBook_.chapters.size(); ++i) {
+      size_t chapterSize = 0;
+      const std::string chapterPath = "c" + std::to_string(i) + ".xhtml";
+      if (!getItemSize(chapterPath, &chapterSize) || chapterSize > UINT32_MAX - cumulativeSize) {
+        LOG_ERR("EBP", "Cannot cache cumulative FB2 chapter sizes at spine %u", static_cast<unsigned>(i));
+        directFb2CumulativeSizes_.clear();
+        return false;
+      }
+      cumulativeSize += static_cast<uint32_t>(chapterSize);
+      directFb2CumulativeSizes_.push_back(cumulativeSize);
+    }
+    LOG_DBG("EBP", "Cached cumulative sizes for %u FB2 chapters (%lu bytes)",
+            static_cast<unsigned>(directFb2CumulativeSizes_.size()), static_cast<unsigned long>(cumulativeSize));
     bookMetadataCache.reset();
     cssParser.reset(new CssParser(cachePath));
     cssFiles = {"fb2.css"};
@@ -2342,12 +2358,9 @@ size_t Epub::getCumulativeSpineItemSize(const int spineIndex) const { return get
 BookMetadataCache::SpineEntry Epub::getSpineItem(const int spineIndex) const {
   if (directFb2_) {
     if (spineIndex < 0 || spineIndex >= static_cast<int>(fb2ReaderBook_.chapters.size())) return {};
-    size_t cumulative = 0;
-    for (int i = 0; i <= spineIndex; ++i) {
-      size_t size = 0;
-      getItemSize("c" + std::to_string(i) + ".xhtml", &size);
-      cumulative += size;
-    }
+    const uint32_t cumulative = spineIndex < static_cast<int>(directFb2CumulativeSizes_.size())
+                                    ? directFb2CumulativeSizes_[static_cast<size_t>(spineIndex)]
+                                    : 0;
     return {"c" + std::to_string(spineIndex) + ".xhtml", static_cast<uint32_t>(cumulative),
             static_cast<int16_t>(spineIndex)};
   }

@@ -7,7 +7,6 @@
 
 class Txt {
   std::string filepath;
-  std::string cacheBasePath;
   std::string cachePath;
   bool loaded = false;
   size_t fileSize = 0;

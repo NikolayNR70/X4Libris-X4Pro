@@ -97,6 +97,9 @@ brings its own -- and built again only for a reason (`LibraryStaleness::rebuildN
 - **No valid index**: missing, another format version, or sections that do not fit the file.
 - **The other *Show Hidden Files* setting, or other walk rules**: either lists other books
   (`acceptRules` in the header: the setting plus a revision of what the walk always leaves out).
+- **A newer metadata resolver**: the header's `metadataRevision` makes Authors walk the card again;
+  the per-book signature invalidates only FB2/ZIP metadata entries, and the join preserves each book's
+  original `firstSeen` value and all other formats' already-resolved authors.
 - **The card changed since the last finished build**, in this boot or an earlier one. Every change the
   firmware makes outside its cache folder goes through `HalStorage::noteContentChange`: web and WebDAV
   uploads, deletes and renames, Calibre wireless, OPDS downloads, the metadata editor's sidecars,

@@ -41,9 +41,10 @@ class Xtc {
   void clearPageCache() const;                    // drop all persisted page_* planes
 
  public:
-  explicit Xtc(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)), loaded(false) {
-    // Create cache key based on filepath (same as Epub)
-    cachePath = cacheDir + "/tmp/xtc_" + std::to_string(std::hash<std::string>{}(this->filepath));
+  explicit Xtc(std::string filepath, const std::string& /*cacheDir*/) : filepath(std::move(filepath)), loaded(false) {
+    // Create a filepath key in a bounded FAT directory bucket (same scheme as Epub).
+    const size_t hash = std::hash<std::string>{}(this->filepath);
+    cachePath = FsHelpers::bookCachePath("xtc_" + std::to_string(hash), static_cast<uint32_t>(hash));
   }
   ~Xtc() = default;
 
