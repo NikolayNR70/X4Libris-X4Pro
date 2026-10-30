@@ -1,0 +1,1183 @@
+#include "HalClock.h"
+
+#include <Arduino.h>
+#include <HalCapabilities.h>
+#include <HalGPIO.h>
+#include <Logging.h>
+#include <Preferences.h>
+#include <Rtc.h>  // SDK driver, used for the PCF8563 family (DS3231 is handled inline below)
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <Wire.h>  // Needed for I2C communication with the RTC
+#include <esp_private/esp_clk.h>
+#include <esp_sntp.h>
+#include <sys/time.h>
+#include <time.h>
+
+#include <cmath>
+#include <cstdlib>
+
+#include "HalI2cBus.h"
+
+// ---- RTC / I2C configuration ----------------------------------------------
+// Pins for ESP32-C3 (according to https://gist.github.com/CrazyCoder/1c5f846adee18e21f91e264601a6ddce)
+// The DS3231's own I2C address. Read from the board profile rather than
+// hardcoded, but note the guard in initExternalRTC() is rtcType() == Ds3231, so
+// this is only ever used on a board that actually has one -- it is not a generic
+// "the RTC" address. A BM8563 answers at 0x51 with different registers and needs
+// its own driver, not this one with a different constant.
+static uint8_t ds3231Address() { return BoardConfig::ACTIVE.sensors.rtcAddr; }
+// static constexpr int I2C_SDA = 8;
+// static constexpr int I2C_SCL = 9;
+static uint8_t bin2bcd(uint8_t val) { return val + 6 * (val / 10); }
+static uint8_t bcd2bin(uint8_t val) { return val - 6 * (val >> 4); }
+
+/**
+ * Convert struct tm (interpreted as UTC) to Unix epoch seconds.
+ * Replaces mktime(), as mktime considers the local timezone (TZ).
+ */
+static time_t timegm_compat(const struct tm* tm) {
+  int32_t year = tm->tm_year + 1900;
+  int32_t month = tm->tm_mon;  // 0-11
+
+  // Helper calculation: days since the beginning of the year
+  static const uint16_t days_before_month[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+
+  // Days since 1970 (considering leap years)
+  time_t days = (year - 1970) * 365 + (year - 1969) / 4;
+  days += days_before_month[month];
+
+  // Leap year correction for the current year (no extra day before March)
+  if (month > 1 && (year % 4 == 0)) {
+    days++;
+  }
+  days += tm->tm_mday - 1;
+
+  return days * 86400 + tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec;
+}
+
+// ---- RTC-memory state (survives deep sleep, not cold boot) ----------------
+
+static constexpr uint32_t CLOCK_RTC_MAGIC = 0xC10C4B1D;
+// Set when the LP timer will KEEP RUNNING from this capture until the next restore(), so the
+// elapsed-time correction in restore() is usable. That is true for every reboot (a CPU reset
+// leaves the RTC domain running) and for a deep sleep that holds the clock rail up; it is false
+// only for a deep sleep that powers the rail down (X3, or useClock off).
+//
+// Previously named ..._LP_VALID and set only from saveBeforeSleep(), which made it mean "the LP
+// timer survives the upcoming SLEEP". restore() reads it as "the LP timer is usable NOW", and
+// those differ for a reboot -- which is how syncNtp()'s capture(false) came to strand the clock
+// on the uncorrected NVS path after every silent restart.
+static constexpr uint32_t CLOCK_RTC_FLAG_LP_CONTINUOUS = 0x00000001u;
+
+// Temperature drift model for ESP32 RTC-based timekeeping.
+//
+// The chip's low-power (slow) clock frequency depends on temperature.
+// ESP32 variants can drift by about 2 minutes per day per °C from the
+// initial captured operating temperature.
+//
+// - dt_drift ≈ 120 seconds/day/°C
+// - relative frequency error per second per °C = 120 / 86400
+//
+// At restore() we apply a first-order correction over the sleep interval:
+// corrected_interval = raw_interval × (1 + ΔT × drift_factor), where
+// drift_factor = 120 / 86400.
+//
+// Experimental source: https://www.reddit.com/r/esp32/comments/11cikkp/the_clock_on_the_esp_is_wrong/
+static constexpr float CLOCK_TEMP_DRIFT_SECONDS_PER_SECOND_PER_DEG = 120.0f / 86400.0f;
+
+RTC_NOINIT_ATTR static uint32_t rtcClockMagic;
+RTC_NOINIT_ATTR static uint32_t rtcClockFlags;
+RTC_NOINIT_ATTR static time_t rtcEpoch;        // last-known unix epoch
+RTC_NOINIT_ATTR static uint64_t rtcLpTimeUs;   // esp_clk_rtc_time() at capture
+RTC_NOINIT_ATTR static uint32_t rtcSlowCal;    // esp_clk_slowclk_cal_get() at capture
+RTC_NOINIT_ATTR static float rtcTemperatureC;  // captured chip temperature at save
+RTC_NOINIT_ATTR static uint32_t rtcStateChecksum;
+
+static bool clockApproximate = true;
+
+// True when the clock was seeded from an NVS epoch too old to be shown to the user (see the
+// stale branch in restore()). The wall clock IS set in that case -- a last-known-good time is a
+// usable LOWER BOUND for certificate validity windows, cache TTLs and session timestamps, all of
+// which previously got 1970 instead -- but the UI must not present it as the time of day.
+// Cleared by a successful NTP sync.
+static bool clockStaleRestore = false;
+
+// How long the deep sleep that this boot woke from lasted, in seconds; 0 when it
+// cannot be established. Set once by restore(), reported on the System Information
+// screen. Only the two authoritative restore paths can produce it: the DS3231 and
+// the LP-timer correction both give a wall clock derived independently of the
+// sleep-entry epoch, so the difference between them is real elapsed time. The
+// cold-boot NVS path sets the clock FROM that same epoch, so its difference is
+// zero by construction and tells us nothing.
+static uint32_t lastSleepSec = 0;
+// Sanity bound on the above, shared by both paths: a year. Anything larger means
+// a stale NVS epoch or a corrupt snapshot, not a real sleep.
+static constexpr double MAX_PLAUSIBLE_SLEEP_S = 365.0 * 24 * 3600;
+
+// Drift correction scale factor (learned from NTP sync results).
+//
+// Raw temp drift model uses 2 min/day/°C -> factor = 120/86400. This is a
+// generic base model. The actual board may behave a bit differently. On each
+// NTP sync we estimate how the local clock error compares to the model and
+// update this scale factor slightly to converge toward real world behavior.
+//
+// rtcDriftScale = 1.0 means we trust 2 min/day/°C exactly. If the device is
+// slower/faster than that, NTP drift calibration adjusts this factor.
+static float rtcDriftScale = 1.0f;
+
+static unsigned long lastPeriodicUpdateMs = 0;
+static constexpr unsigned long PERIODIC_UPDATE_INTERVAL_MS = 10UL * 60UL * 1000UL;
+
+// ---- NVS helpers ----------------------------------------------------------
+
+// If the last NTP sync is older than this, treat a cold-boot restore as
+// unsynced rather than showing a potentially very wrong time.
+static constexpr int64_t STALE_THRESHOLD_S = 72 * 3600;  // 72 hours
+
+static constexpr char NVS_NAMESPACE[] = "halclock";
+static constexpr char NVS_KEY[] = "epoch";
+static constexpr char NVS_SYNC_KEY[] = "lastsync";
+static constexpr char NVS_DRIFT_KEY[] = "driftcoef";
+static constexpr char NVS_TEMP_KEY[] = "lasttemp";
+// Sleep-entry epoch, written by capture() and CONSUMED (zeroed) by restore().
+// Deliberately not NVS_KEY: that one is the clock's cold-boot fallback and must
+// survive, whereas this must not. Consuming it is what makes the reported
+// duration a sleep length rather than "time since the last sleep began" — the
+// device can reboot many times between sleeps (every reflash does), and each of
+// those boots would otherwise report the same ever-staler figure.
+static constexpr char NVS_SLEEP_KEY[] = "sleepmark";
+
+static void nvsWrite(time_t epoch) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putLong64(NVS_KEY, (int64_t)epoch);
+    prefs.end();
+  }
+}
+
+static void nvsWriteDriftScale(float driftScale) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putFloat(NVS_DRIFT_KEY, driftScale);
+    prefs.end();
+  }
+}
+
+static float nvsReadDriftScale() {
+  Preferences prefs;
+  float result = 1.0f;
+  if (prefs.begin(NVS_NAMESPACE, true)) {
+    result = prefs.getFloat(NVS_DRIFT_KEY, 1.0f);
+    prefs.end();
+  }
+  // Guard against NaN, Inf, or out-of-range values from corrupted NVS.
+  if (!std::isfinite(result) || result < 0.1f || result > 5.0f) {
+    result = 1.0f;
+  }
+  return result;
+}
+
+static void nvsWriteLastSyncTemp(float tempC) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putFloat(NVS_TEMP_KEY, tempC);
+    prefs.end();
+  }
+}
+
+static float nvsReadLastSyncTemp() {
+  Preferences prefs;
+  float result = 0.0f;
+  if (prefs.begin(NVS_NAMESPACE, true)) {
+    result = prefs.getFloat(NVS_TEMP_KEY, 0.0f);
+    prefs.end();
+  }
+  return result;
+}
+
+static void nvsWriteSyncTime(time_t syncEpoch) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putLong64(NVS_SYNC_KEY, (int64_t)syncEpoch);
+    prefs.end();
+  }
+}
+
+static void nvsWriteSleepMark(time_t epoch) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putLong64(NVS_SLEEP_KEY, (int64_t)epoch);
+    prefs.end();
+  }
+}
+
+// Read the sleep marker and clear it in the same breath, so exactly one boot can
+// ever claim a given sleep. Returns 0 when no sleep is pending.
+static time_t nvsTakeSleepMark() {
+  Preferences prefs;
+  time_t epoch = 0;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    epoch = (time_t)prefs.getLong64(NVS_SLEEP_KEY, 0);
+    if (epoch != 0) {
+      prefs.putLong64(NVS_SLEEP_KEY, 0);  // one write per sleep cycle, not per boot
+    }
+    prefs.end();
+  }
+  return epoch;
+}
+
+static time_t nvsRead() {
+  Preferences prefs;
+  time_t epoch = 0;
+  if (prefs.begin(NVS_NAMESPACE, true)) {
+    epoch = (time_t)prefs.getLong64(NVS_KEY, 0);
+    prefs.end();
+  }
+  return epoch;
+}
+
+static time_t nvsReadSyncTime() {
+  Preferences prefs;
+  time_t syncEpoch = 0;
+  if (prefs.begin(NVS_NAMESPACE, true)) {
+    syncEpoch = (time_t)prefs.getLong64(NVS_SYNC_KEY, 0);
+    prefs.end();
+  }
+  return syncEpoch;
+}
+
+// ---- internal helpers -----------------------------------------------------
+
+static bool initExternalRTC();
+static float readExternalTemp();
+
+// The SDK RTC driver, for the PCF8563 family only. Function-local so it is
+// constructed on first use rather than during static init, where the I2C bus is
+// not up yet. Only reached when rtcType() == Pcf8563.
+static freeink::Rtc& externalRtc() {
+  static freeink::Rtc rtc;
+  return rtc;
+}
+
+static float readChipTemperatureC() {
+  // ESP32 and ESP32-C3 use the internal ADC temperature sensor.
+  //
+  // Specifically Ds3231, not merely "an external RTC is present": the DS3231
+  // carries a temperature register at 0x11 and the PCF8563 family carries no
+  // temperature sensor at all, so widening this with the RTC gate would read a
+  // nonexistent register and report noise as the device temperature.
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Ds3231 && initExternalRTC()) {
+    return readExternalTemp();
+  }
+  return (float)temperatureRead();
+}
+
+// ---- New internal helpers for DS3231 ---------------------------------------
+
+static bool initExternalRTC() {
+  static bool initialized = false;
+  static bool exists = false;
+  if (initialized) return exists;
+  initialized = true;
+
+  // Two families, two drivers. The DS3231 is probed and driven inline below.
+  // The PCF8563 family (T5S3's PCF8563TS, X4 Pro's BM8563 -- both at 0x51) is
+  // register-incompatible with it and would return garbage if driven with DS3231
+  // offsets, so it goes through the SDK's Rtc lib, which already implements it.
+  // Dispatching on rtcType rather than hasHardwareRtc() is what keeps those apart.
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    HalI2cBus::Lock i2cLock;
+    exists = externalRtc().begin();
+    LOG_INF("CLK", exists ? "PCF8563 RTC found via SDK driver." : "No PCF8563 RTC found.");
+    return exists;
+  }
+  if (HalCapabilities::rtcType() != BoardConfig::RtcType::Ds3231) {
+    LOG_DBG("CLK", "Skipping external RTC init: board profile declares none");
+    return false;
+  }
+
+  // Wire has already been initialized; no need to call Wire.begin(I2C_SDA, I2C_SCL);
+  // Shares the bus with the touch controller on touch boards, which is serviced
+  // from the sampler task — see HalI2cBus. No-op on non-touch boards.
+  HalI2cBus::Lock i2cLock;
+  Wire.beginTransmission(ds3231Address());
+  if (Wire.endTransmission() == 0) {
+    exists = true;
+    LOG_INF("CLK", "DS3231 Hardware via I2C found.");
+  } else {
+    LOG_INF("CLK", "No DS3231 found.");
+  }
+  return exists;
+}
+
+// Write full date+time to the external RTC (DS3231: all 7 registers inline;
+// PCF8563 family: delegated to the SDK driver). Both are operated in UTC.
+static void writeExternalRTC(time_t t) {
+  struct tm timeinfo;
+  gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
+
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    freeink::Rtc::DateTime dt;
+    dt.year = static_cast<uint16_t>(timeinfo.tm_year + 1900);
+    dt.month = static_cast<uint8_t>(timeinfo.tm_mon + 1);
+    dt.day = static_cast<uint8_t>(timeinfo.tm_mday);
+    dt.hour = static_cast<uint8_t>(timeinfo.tm_hour);
+    dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
+    dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
+    dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);  // both are 0 = Sunday
+    HalI2cBus::Lock i2cLock;
+    externalRtc().set(dt);
+    return;
+  }
+
+  HalI2cBus::Lock i2cLock;
+  Wire.beginTransmission(ds3231Address());
+  Wire.write(0x00);                             // Start at register 0x00 (seconds)
+  Wire.write(bin2bcd(timeinfo.tm_sec));         // 0x00: Seconds
+  Wire.write(bin2bcd(timeinfo.tm_min));         // 0x01: Minutes
+  Wire.write(bin2bcd(timeinfo.tm_hour));        // 0x02: Hours (24h mode)
+  Wire.write(bin2bcd(timeinfo.tm_wday + 1));    // 0x03: Day of week (1-7)
+  Wire.write(bin2bcd(timeinfo.tm_mday));        // 0x04: Date (01-31)
+  Wire.write(bin2bcd(timeinfo.tm_mon + 1));     // 0x05: Month (01-12, century bit 0 = 20xx)
+  Wire.write(bin2bcd(timeinfo.tm_year - 100));  // 0x06: Year (00-99 = 2000-2099)
+  Wire.endTransmission();
+}
+
+// Read time from the external RTC. Returns 0 when the time cannot be trusted --
+// the callers treat 0 as "no usable RTC time", so a stopped oscillator must not
+// surface as a valid timestamp. The SDK driver already reports that case by
+// returning false on the PCF8563's VL flag.
+static time_t readExternalRTC() {
+  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+    freeink::Rtc::DateTime dt;
+    HalI2cBus::Lock i2cLock;
+    if (!externalRtc().now(dt)) return 0;
+
+    struct tm timeinfo = {};
+    timeinfo.tm_year = static_cast<int>(dt.year) - 1900;
+    timeinfo.tm_mon = static_cast<int>(dt.month) - 1;
+    timeinfo.tm_mday = dt.day;
+    timeinfo.tm_hour = dt.hour;
+    timeinfo.tm_min = dt.minute;
+    timeinfo.tm_sec = dt.second;
+    timeinfo.tm_isdst = 0;
+    return timegm_compat(&timeinfo);
+  }
+
+  HalI2cBus::Lock i2cLock;
+  Wire.beginTransmission(ds3231Address());
+  Wire.write(0x00);
+  if (Wire.endTransmission() != 0) return 0;
+
+  Wire.requestFrom(ds3231Address(), (uint8_t)7);
+  if (Wire.available() < 7) return 0;
+
+  struct tm timeinfo = {};
+  timeinfo.tm_sec = bcd2bin(Wire.read() & 0x7F);
+  timeinfo.tm_min = bcd2bin(Wire.read());
+  timeinfo.tm_hour = bcd2bin(Wire.read() & 0x3F);
+  Wire.read();  // Wochentag überspringen
+  timeinfo.tm_mday = bcd2bin(Wire.read());
+  timeinfo.tm_mon = bcd2bin(Wire.read()) - 1;
+  timeinfo.tm_year = bcd2bin(Wire.read()) + 100;
+  timeinfo.tm_isdst = 0;
+
+  return timegm_compat(&timeinfo);
+}
+
+// Read temperature (Register 0x11)
+static float readExternalTemp() {
+  Wire.beginTransmission(ds3231Address());
+  Wire.write(0x11);
+  if (Wire.endTransmission() != 0) {
+    return 0.0f;
+  }
+
+  int count = Wire.requestFrom(ds3231Address(), (uint8_t)2);
+  if (count < 2) {
+    return 0.0f;
+  }
+
+  int8_t msb = Wire.read();
+  uint8_t lsb = Wire.read();
+  return (float)msb + (lsb >> 6) * 0.25f;
+}
+
+// ----
+
+static void setSystemClock(time_t epoch) {
+  struct timeval tv = {};
+  tv.tv_sec = epoch;
+  settimeofday(&tv, nullptr);
+}
+
+static uint32_t fnv1a32Append(uint32_t hash, const void* data, size_t len) {
+  const auto* bytes = static_cast<const uint8_t*>(data);
+  for (size_t i = 0; i < len; ++i) {
+    hash ^= bytes[i];
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
+static uint32_t computeRtcStateChecksum() {
+  uint32_t hash = 2166136261u;
+  hash = fnv1a32Append(hash, &rtcClockFlags, sizeof(rtcClockFlags));
+  hash = fnv1a32Append(hash, &rtcEpoch, sizeof(rtcEpoch));
+  hash = fnv1a32Append(hash, &rtcLpTimeUs, sizeof(rtcLpTimeUs));
+  hash = fnv1a32Append(hash, &rtcSlowCal, sizeof(rtcSlowCal));
+  hash = fnv1a32Append(hash, &rtcTemperatureC, sizeof(rtcTemperatureC));
+  return hash;
+}
+
+static bool rtcStateLooksSane() {
+  // Broad sanity window: reject obviously invalid RTC values only.
+  static constexpr time_t MIN_EPOCH = 1577836800;  // 2020-01-01 UTC
+  static constexpr time_t MAX_EPOCH = 7258118400;  // 2200-01-01 UTC
+
+  if (rtcEpoch < MIN_EPOCH || rtcEpoch > MAX_EPOCH) {
+    return false;
+  }
+  if (rtcLpTimeUs == 0 || rtcSlowCal == 0) {
+    return false;
+  }
+  if (!std::isfinite(rtcTemperatureC) || rtcTemperatureC < -80.0f || rtcTemperatureC > 150.0f) {
+    return false;
+  }
+  return true;
+}
+
+static bool rtcValid() {
+  if (rtcClockMagic != CLOCK_RTC_MAGIC) {
+    return false;
+  }
+
+  // Backward compatibility: older firmware snapshots had no checksum.
+  if (rtcStateChecksum == 0) {
+    return rtcStateLooksSane();
+  }
+
+  if (rtcStateChecksum != computeRtcStateChecksum()) {
+    return false;
+  }
+
+  return rtcStateLooksSane();
+}
+
+/// Compute temperature-corrected elapsed seconds from LP timer delta.
+/// Uses the trapezoidal rule (average of start + end temperature) as a
+/// first-order approximation of the temperature integral over the interval.
+/// Returns the corrected elapsed seconds and updates lpNowOut/calNowOut
+/// for the caller to re-baseline.
+static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
+  uint32_t calNow = esp_clk_slowclk_cal_get();
+  uint64_t elapsedUs;
+  if (rtcSlowCal != 0 && calNow != 0) {
+    // rtcLpTimeUs was computed with rtcSlowCal; convert it to the
+    // current calibration basis so the subtraction is consistent.
+    uint64_t lpThenCorrected = (uint64_t)((double)rtcLpTimeUs * calNow / rtcSlowCal);
+    elapsedUs = lpNow - lpThenCorrected;
+  } else {
+    elapsedUs = lpNow - rtcLpTimeUs;
+  }
+
+  // Use the full temperature delta between the average over the interval
+  // and the calibration reference (which is the capture-time temperature).
+  // avgTemp approximates the mean temperature during the interval.
+  // The drift model says the RTC runs (1 + deltaT * driftRate) times
+  // faster/slower than nominal, so the true elapsed wall-clock time
+  // differs from the raw LP-derived time by that factor.
+  float avgTemp = (rtcTemperatureC + tempNow) * 0.5f;
+  // Positive when COOLED DOWN relative to capture temperature.
+  // ESP32 RC oscillator has a positive temperature coefficient: it runs faster
+  // when hotter, causing the LP timer to over-count. To recover true elapsed
+  // time we must REDUCE the raw LP-derived seconds when the device is warmer
+  // than at capture (and INCREASE them when cooler). Hence the sign inversion.
+  float tempDelta = rtcTemperatureC - avgTemp;  // = (rtcTemperatureC - tempNow) / 2
+  float tempFactor = 1.0f + tempDelta * CLOCK_TEMP_DRIFT_SECONDS_PER_SECOND_PER_DEG * rtcDriftScale;
+  if (tempFactor < 0.5f) {
+    tempFactor = 0.5f;
+  } else if (tempFactor > 1.5f) {
+    tempFactor = 1.5f;
+  }
+
+  double elapsedSec = (double)elapsedUs / 1000000.0;
+  double correctedSec = elapsedSec * (double)tempFactor;
+
+  LOG_DBG("CLK", "Drift calc: startT=%.1fC nowT=%.1fC dT=%.3f factor=%.6f raw=%.3fs corr=%.3fs", rtcTemperatureC,
+          tempNow, tempDelta, tempFactor, elapsedSec, correctedSec);
+
+  return correctedSec;
+}
+
+/// Capture current time + LP timer into RTC memory, and epoch into NVS.
+/// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
+static void capture(bool lpContinuous) {
+  rtcEpoch = time(nullptr);
+  // Update DS3231 only when the current time is authoritative.
+  if (initExternalRTC() && !clockApproximate) {
+    writeExternalRTC(rtcEpoch);
+  }
+  rtcLpTimeUs = esp_clk_rtc_time();
+  rtcSlowCal = esp_clk_slowclk_cal_get();
+  rtcTemperatureC = readChipTemperatureC();
+  rtcClockMagic = CLOCK_RTC_MAGIC;
+  rtcClockFlags = lpContinuous ? CLOCK_RTC_FLAG_LP_CONTINUOUS : 0;
+  rtcStateChecksum = computeRtcStateChecksum();
+  nvsWrite(rtcEpoch);
+  nvsWriteSleepMark(rtcEpoch);
+}
+
+// ---- public API -----------------------------------------------------------
+
+namespace HalClock {
+
+void applyTimezone(const char* posixTz) {
+  if (posixTz == nullptr || posixTz[0] == '\0') return;
+  setenv("TZ", posixTz, 1);
+  tzset();
+  LOG_DBG("CLK", "Timezone applied: %s", posixTz);
+}
+
+static const char* sntpStatusName(sntp_sync_status_t status) {
+  switch (status) {
+    case SNTP_SYNC_STATUS_RESET:
+      return "reset";
+    case SNTP_SYNC_STATUS_IN_PROGRESS:
+      return "in progress";
+    case SNTP_SYNC_STATUS_COMPLETED:
+      return "completed";
+    default:
+      return "unknown";
+  }
+}
+
+// ---- direct SNTP query ----------------------------------------------------
+//
+// esp_sntp_init() sends nothing when it is called. IDF ships
+// CONFIG_LWIP_SNTP_STARTUP_DELAY=y with CONFIG_LWIP_SNTP_MAXIMUM_STARTUP_DELAY=5000, so
+// sntp_init() arms sys_timeout(LWIP_RAND() % 5000, sntp_request) and the FIRST packet leaves
+// after a uniformly random 0-5000 ms. The delay exists so a fleet of devices does not stampede a
+// public pool at power-on; on a sync the user is sitting and watching it is 2.5 s of dead air on
+// average (measured 3.41 s in a KOReader sync trace, against an exchange that takes tens of ms),
+// and it is compiled into the prebuilt SDK libs where sdkconfig cannot reach it.
+//
+// A client SNTP request is a single 48-byte datagram, so asking directly costs a few lines and
+// skips both the startup delay and lwip's serial 3-s-per-server timeout: every target is asked at
+// once and the first valid answer wins. This is a fast path only -- syncNtp() falls back to the
+// full esp_sntp client whenever it returns false, so hostname servers, DNS, and the polling
+// behaviour all still exist untouched behind it.
+namespace {
+
+constexpr uint16_t NTP_PORT = 123;
+constexpr size_t NTP_PACKET_SIZE = 48;
+// Seconds between the NTP epoch (1900-01-01) and the Unix epoch (1970-01-01).
+constexpr uint32_t NTP_TO_UNIX_OFFSET = 2208988800UL;
+// A malformed or spoofed reply that sets the clock is worse than no sync at all -- it would also
+// silently break TLS certificate validity checks -- so anything outside a plausible window is
+// dropped rather than trusted.
+constexpr time_t NTP_MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01
+constexpr time_t NTP_MAX_PLAUSIBLE_EPOCH = 2524608000;  // 2050-01-01
+// Generous: a gateway answers in single-digit ms and a public server in tens. Exceeding this
+// means the fast path is not going to work here, and the fallback wants the remaining budget.
+constexpr uint32_t QUICK_SNTP_TIMEOUT_MS = 1000;
+
+bool isUnsetAddress(const IPAddress& addr) { return static_cast<uint32_t>(addr) == 0; }
+
+bool quickSntpQuery(const IPAddress* targets, size_t targetCount, time_t& outEpoch, IPAddress& outSource) {
+  WiFiUDP udp;
+  if (udp.begin(0) == 0) {
+    LOG_DBG("CLK", "Quick SNTP: could not open a UDP socket");
+    return false;
+  }
+
+  uint8_t packet[NTP_PACKET_SIZE] = {};
+  packet[0] = 0x1B;  // LI=0 (no warning), VN=3, Mode=3 (client)
+
+  size_t sent = 0;
+  for (size_t i = 0; i < targetCount; ++i) {
+    if (isUnsetAddress(targets[i])) continue;
+    if (udp.beginPacket(targets[i], NTP_PORT) != 1) continue;
+    udp.write(packet, NTP_PACKET_SIZE);
+    if (udp.endPacket() == 1) sent++;
+  }
+  if (sent == 0) {
+    udp.stop();
+    return false;
+  }
+
+  const uint32_t deadline = millis() + QUICK_SNTP_TIMEOUT_MS;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    const int size = udp.parsePacket();
+    if (size <= 0) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    uint8_t reply[NTP_PACKET_SIZE] = {};
+    const int received = (size >= static_cast<int>(NTP_PACKET_SIZE)) ? udp.read(reply, NTP_PACKET_SIZE) : 0;
+    // Whatever that datagram was, none of it may be left behind: parsePacket() refuses to fetch
+    // the next one while the receive buffer still holds anything, and with several servers asked
+    // at once the good answer is often the one queued behind the bad. A runt datagram we never
+    // read, or the tail of an authenticated reply (48 bytes of SNTP plus a key id and digest),
+    // would otherwise wedge this loop until the deadline.
+    udp.flush();
+    if (received < static_cast<int>(NTP_PACKET_SIZE)) {
+      continue;
+    }
+
+    const uint8_t leapIndicator = reply[0] >> 6;
+    const uint8_t mode = reply[0] & 0x07;
+    const uint8_t stratum = reply[1];
+    // LI=3 is the server declaring its own clock unsynchronised; mode 4 is a server reply and 5
+    // a broadcast; stratum 0 is a kiss-o'-death packet and 16+ means unsynchronised. Any of those
+    // is an answer that arrived but must not be believed.
+    if (leapIndicator == 3 || (mode != 4 && mode != 5) || stratum == 0 || stratum > 15) {
+      continue;
+    }
+
+    // Transmit timestamp, seconds part: bytes 40..43, big endian.
+    const uint32_t ntpSeconds = (static_cast<uint32_t>(reply[40]) << 24) | (static_cast<uint32_t>(reply[41]) << 16) |
+                                (static_cast<uint32_t>(reply[42]) << 8) | static_cast<uint32_t>(reply[43]);
+    if (ntpSeconds <= NTP_TO_UNIX_OFFSET) continue;
+
+    const time_t epoch = static_cast<time_t>(ntpSeconds - NTP_TO_UNIX_OFFSET);
+    if (epoch < NTP_MIN_PLAUSIBLE_EPOCH || epoch > NTP_MAX_PLAUSIBLE_EPOCH) {
+      LOG_DBG("CLK", "Quick SNTP: rejecting implausible epoch %lld from %s", (long long)epoch,
+              udp.remoteIP().toString().c_str());
+      continue;
+    }
+
+    outEpoch = epoch;
+    outSource = udp.remoteIP();
+    udp.stop();
+    return true;
+  }
+
+  udp.stop();
+  return false;
+}
+
+}  // namespace
+
+bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
+  if (errorBuf && errorBufSize > 0) {
+    errorBuf[0] = '\0';
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    if (errorBuf && errorBufSize > 0) {
+      snprintf(errorBuf, errorBufSize, "WiFi disconnected");
+    }
+    LOG_ERR("CLK", "NTP sync failed: WiFi disconnected");
+    return false;
+  }
+
+  const unsigned long syncStartMs = millis();
+  LOG_DBG("CLK", "NTP sync start: dns=%s gw=%s rssi=%ld ip=%s", WiFi.dnsIP().toString().c_str(),
+          WiFi.gatewayIP().toString().c_str(), static_cast<long>(WiFi.RSSI()), WiFi.localIP().toString().c_str());
+
+  time_t preSyncTime = time(nullptr);
+  time_t prevSyncTime = nvsReadSyncTime();
+  float prevSyncTemp = nvsReadLastSyncTemp();
+
+  const bool havePreferred = (preferredServer != nullptr) && (preferredServer[0] != '\0');
+
+  // Ask directly first; see the quickSntpQuery() comment for why the SDK's own client cannot be
+  // asked to hurry. Everything below this block is unchanged and still runs whenever it fails.
+  bool synced = false;
+  {
+    IPAddress quickTargets[2];
+    size_t quickCount = 0;
+    if (havePreferred) {
+      // A configured server is a deliberate choice, so the fast path either uses that server or
+      // steps aside entirely -- it must never quietly sync from somewhere the user did not pick.
+      // Only an IP literal qualifies: resolving a hostname is the one part of this that can block
+      // unpredictably, and the full client below already does it properly.
+      IPAddress preferredIp;
+      if (preferredIp.fromString(preferredServer)) {
+        quickTargets[quickCount++] = preferredIp;
+      }
+    } else {
+      // No configured server. The gateway is one hop away and most home routers answer NTP; the
+      // Cloudflare anycast address needs no DNS. Both are asked at once and the first valid
+      // answer wins, so a router that does not serve time costs nothing.
+      const IPAddress gateway = WiFi.gatewayIP();
+      if (!isUnsetAddress(gateway)) {
+        quickTargets[quickCount++] = gateway;
+      }
+      quickTargets[quickCount++] = IPAddress(162, 159, 200, 1);
+    }
+
+    time_t quickEpoch = 0;
+    IPAddress quickSource;
+    if (quickCount > 0 && quickSntpQuery(quickTargets, quickCount, quickEpoch, quickSource)) {
+      setSystemClock(quickEpoch);
+      LOG_INF("CLK", "Quick SNTP: %s answered in %lu ms", quickSource.toString().c_str(), millis() - syncStartMs);
+      synced = true;
+    } else {
+      LOG_DBG("CLK", "Quick SNTP: no usable answer after %lu ms; falling back to the SNTP client",
+              millis() - syncStartMs);
+    }
+  }
+
+  if (!synced) {
+    if (esp_sntp_enabled()) {
+      esp_sntp_stop();
+    }
+
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    // Register servers in priority order. A user-configured server (host or IP),
+    // when set, is polled first. The hardcoded anycast IP (Cloudflare
+    // time.cloudflare.com) needs no DNS lookup, so it always sits ahead of the
+    // pool hostname -- this avoids a full timeout when the local resolver is slow
+    // to answer right after DHCP. SNTP polls all registered servers, so a working
+    // answer from any of them completes the sync.
+    uint8_t idx = 0;
+    if (havePreferred) {
+      esp_sntp_setservername(idx++, preferredServer);
+      LOG_DBG("CLK", "NTP preferred server: %s", preferredServer);
+    }
+    esp_sntp_setservername(idx++, "162.159.200.1");
+    esp_sntp_setservername(idx++, "pool.ntp.org");
+    esp_sntp_init();
+
+    int retry = 0;
+    constexpr int maxRetries = 50;  // 5 seconds
+    while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < maxRetries) {
+      vTaskDelay(100 / portTICK_PERIOD_MS);
+      retry++;
+    }
+
+    if (retry >= maxRetries) {
+      const char* statusName = sntpStatusName(sntp_get_sync_status());
+      if (errorBuf && errorBufSize > 0) {
+        snprintf(errorBuf, errorBufSize, "NTP timeout (%s)", statusName);
+      }
+      LOG_ERR("CLK", "NTP sync timeout after %lu ms (%s, dns=%s)", millis() - syncStartMs, statusName,
+              WiFi.dnsIP().toString().c_str());
+      // Stop SNTP on the failure path so a later applyClientTime() (which
+      // refuses while SNTP is enabled) isn't blocked by a dangling instance.
+      esp_sntp_stop();
+      return false;
+    }
+  }
+
+  // NTP sync yields authoritative time; allow DS3231 to be updated.
+  clockApproximate = false;
+  clockStaleRestore = false;
+  // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
+  // across which the RTC domain and the LP timer keep running, so restore() can and should apply
+  // the elapsed correction -- or a deep sleep, which re-captures through saveBeforeSleep() with
+  // the real rail state and supersedes this.
+  //
+  // With false, every silentRestart() after a sync (and there is one after every KOReader sync,
+  // web-server exit, font download, OTA and heap recovery) fell through to the uncorrected NVS
+  // path and set the clock back to this instant, discarding everything since. Device evidence:
+  // never once "Restored from RTC + LP timer" across dozens of boots, always "Restored from NVS
+  // ... (no elapsed correction)", with the clock visibly stepping backwards over the reboot
+  // (13:06:52 -> 13:05:21). The losses compound per reboot and surfaced as a 45%-slow clock
+  // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
+  // floor -- the drift learner was measuring reboot count, not temperature.
+  capture(true);
+  nvsWriteSyncTime(rtcEpoch);
+
+  float currentTemp = rtcTemperatureC;
+  if (currentTemp != 0.0f) {
+    nvsWriteLastSyncTemp(currentTemp);
+  }
+
+  if (prevSyncTime > 0 && preSyncTime > 0 && rtcEpoch > prevSyncTime) {
+    float interval = (float)(rtcEpoch - prevSyncTime);
+    // error = how far the local clock was off before NTP corrected it.
+    // Negative means local clock was behind (NTP jumped us forward).
+    // Positive means local clock was ahead (NTP pulled us back).
+    float error = (float)(preSyncTime - rtcEpoch);
+    if (interval >= 60.0f) {
+      // Convert to seconds-of-drift per day.
+      float observedDriftPerDay = error * 86400.0f / interval;
+
+      // Adaptive model calibration:
+      // - Observed drift is derived from the difference between local clock
+      //   reading just before NTP and the true time reported by NTP, scaled
+      //   to a per-day rate over the interval since the previous sync.
+      // - The baseline model expects 120 sec/day per °C.
+      // - Measure temp delta since last sync (from stored NVS temp).
+      // - If large enough, compute an empirical scale to apply to the model
+      //   so future drift corrections are better aligned with actual hardware.
+      // - The scale is persisted to NVS via saveBeforeSleep().
+      float effectiveScale = rtcDriftScale;
+      float tempDelta = currentTemp - prevSyncTemp;
+      if (std::fabs(tempDelta) > 0.1f) {
+        float modelDriftPerDay = 120.0f * tempDelta;
+        if (std::fabs(modelDriftPerDay) > 0.01f) {
+          float measuredScale = observedDriftPerDay / modelDriftPerDay;
+          effectiveScale = 0.9f * rtcDriftScale + 0.1f * measuredScale;
+          effectiveScale = std::max(0.1f, std::min(5.0f, effectiveScale));
+          rtcDriftScale = effectiveScale;
+        }
+      }
+
+      LOG_DBG("CLK", "NTP drift: interval=%.0fs error=%.3fs perDay=%.3f scale=%.3f deltaT=%.2f", interval, error,
+              observedDriftPerDay, rtcDriftScale, tempDelta);
+    }
+  }
+
+  clockApproximate = false;
+  LOG_INF("CLK", "NTP synced, epoch %lld", (long long)rtcEpoch);
+  return true;
+}
+
+bool syncNtp(const char* preferredServer) { return syncNtp(nullptr, 0, preferredServer); }
+
+void saveBeforeSleep(bool keepLpAlive) {
+  if (!isSynced()) {
+    return;
+  }
+  capture(keepLpAlive);
+  // Persist learned drift scale and last temperature to NVS so they survive
+  // cold boot. We only write here (not periodically) to minimise flash wear.
+  nvsWriteDriftScale(rtcDriftScale);
+  nvsWriteLastSyncTemp(rtcTemperatureC);
+  LOG_DBG("CLK", "Saved epoch %lld before sleep (driftScale=%.3f)", (long long)rtcEpoch, rtcDriftScale);
+}
+
+void restore() {
+  // Claim any pending sleep marker up front, exactly once per boot. Only the
+  // branches below whose wall clock came from a source that ran THROUGH the
+  // sleep can turn it into a duration; the rest just consume it so a later boot
+  // cannot report a stale one.
+  const time_t sleepEntryEpoch = nvsTakeSleepMark();
+
+  // PRIORITY 1: DS3231 (Hardware-RTC)
+  if (initExternalRTC()) {
+    time_t rtcTime = readExternalRTC();
+    if (rtcTime > 1577836800) {  // Check if time is after 2020 (plausible timestamp)
+      // The DS3231 ran through the sleep, so the difference against the marker
+      // capture() persisted on the way in is the sleep duration. The marker is
+      // zero on any boot that did not follow a sleep (a reflash, a reset), which
+      // is what keeps this from reporting time-since-last-sleep instead.
+      const double slept = static_cast<double>(rtcTime - sleepEntryEpoch);
+      if (sleepEntryEpoch > 0 && slept > 0.0 && slept < MAX_PLAUSIBLE_SLEEP_S) {
+        lastSleepSec = static_cast<uint32_t>(slept);
+      }
+      setSystemClock(rtcTime);
+      rtcEpoch = rtcTime;
+      clockApproximate = false;
+      LOG_INF("CLK", "Got time from hardware RTC. Last deep sleep %us", lastSleepSec);
+      return;
+    }
+  }
+
+  rtcDriftScale = nvsReadDriftScale();
+  const bool lpValid = (rtcClockFlags & CLOCK_RTC_FLAG_LP_CONTINUOUS) != 0;
+  if (rtcValid() && lpValid) {
+    // RTC memory survived — we woke from deep sleep.
+    //
+    // We restore the wall clock by computing elapsed real time from the
+    // LP timer delta and applying both frequency calibration and temperature
+    // drift correction.
+    //
+    // Steps:
+    // 1) Read current LP timer and slow-clock calibration.
+    // 2) Compute raw elapsed LP ticks, on the same calibration basis used
+    //    when capture() was called.
+    // 3) Convert elapsed ticks to seconds.
+    // 4) Apply temperature drift correction based on measured RTC memory
+    //    capture temperature and current chip temp.
+    // 5) Set system time to rtcEpoch + corrected elapsed seconds.
+    //
+    // This is an approximation: we use the average of start/end measured
+    // temperature as a simple integral proxy. More advanced models could
+    // sample temperature continuously, but this is a good tradeoff for low
+    // cost and better accuracy vs no temperature compensation.
+    uint64_t lpNow = esp_clk_rtc_time();
+    time_t estimated = rtcEpoch;
+    if (lpNow > rtcLpTimeUs) {
+      float tempNow = readChipTemperatureC();
+      double correctedSec = computeCorrectedElapsedSec(lpNow, tempNow);
+      // Reject obviously bad values from a corrupted RTC snapshot.
+      // 157680000 s = 5 years.
+      if (std::isfinite(correctedSec) && correctedSec >= 0.0 && correctedSec <= 157680000.0) {
+        estimated += static_cast<time_t>(correctedSec);
+        // The LP timer ran through the sleep, so this correction IS its duration.
+        if (correctedSec < MAX_PLAUSIBLE_SLEEP_S) {
+          lastSleepSec = static_cast<uint32_t>(correctedSec);
+        }
+      } else {
+        LOG_ERR("CLK", "Discarding implausible LP elapsed time: %.3fs", correctedSec);
+      }
+    } else if (lpNow < rtcLpTimeUs) {
+      LOG_ERR("CLK", "LP timer regressed (now=%llu < saved=%llu), using baseline epoch",
+              static_cast<unsigned long long>(lpNow), static_cast<unsigned long long>(rtcLpTimeUs));
+    }
+
+    setSystemClock(estimated);
+    // Re-baseline LP timer and temperature for next interval.
+    rtcEpoch = estimated;
+    rtcLpTimeUs = esp_clk_rtc_time();
+    rtcSlowCal = esp_clk_slowclk_cal_get();
+    rtcTemperatureC = readChipTemperatureC();
+    rtcStateChecksum = computeRtcStateChecksum();
+    clockApproximate = true;
+    LOG_INF("CLK", "Restored from RTC + LP timer, epoch %lld", (long long)estimated);
+    return;
+  }
+
+  // Cold boot — try NVS.  No elapsed correction possible.
+  time_t epoch = nvsRead();
+  if (epoch > 0) {
+    time_t lastSync = nvsReadSyncTime();
+    const bool stale = (lastSync > 0 && (epoch - lastSync) > STALE_THRESHOLD_S);
+    if (stale) {
+      // Previously this returned, leaving the clock at 1970. That protected the DISPLAY from
+      // showing a badly drifted time, which is right -- but it threw the value away for everyone
+      // else, and on these RTC-less boards the machine uses care more than the UI does. A stale
+      // epoch is still a sound lower bound: it cannot make a certificate's notBefore look
+      // unreached (which 1970 does, and which stops the whole TLS trust store from loading), and
+      // it keeps cache TTLs and session timestamps in the right century.
+      //
+      // So set the clock and drop only the authority: clockStaleRestore suppresses the time of
+      // day in the UI until an NTP sync replaces it.
+      clockStaleRestore = true;
+      LOG_ERR("CLK",
+              "NVS epoch %lld is stale (last NTP sync %lld, %lld h ago); using it as a lower bound, "
+              "not for display",
+              (long long)epoch, (long long)lastSync, (long long)((epoch - lastSync) / 3600));
+    }
+    setSystemClock(epoch);
+    rtcEpoch = epoch;
+    rtcLpTimeUs = esp_clk_rtc_time();
+    rtcSlowCal = esp_clk_slowclk_cal_get();
+    rtcTemperatureC = nvsReadLastSyncTemp();
+    if (rtcTemperatureC == 0.0f) {
+      rtcTemperatureC = readChipTemperatureC();
+    }
+    rtcClockMagic = CLOCK_RTC_MAGIC;
+    rtcClockFlags = 0;
+    rtcStateChecksum = computeRtcStateChecksum();
+    clockApproximate = true;
+    LOG_INF("CLK", "Restored from NVS, epoch %lld (no elapsed correction)", (long long)epoch);
+  }
+}
+
+time_t now() {
+  if (!isSynced()) {
+    return 0;
+  }
+  return time(nullptr);
+}
+
+void updatePeriodic() {
+  // DS3231 (if present) has priority, synchronize the system time
+  // every 10 minutes directly against the RTC, instead of calculating.
+  if (initExternalRTC()) {
+    unsigned long nowMs = millis();
+    if (nowMs - lastPeriodicUpdateMs >= PERIODIC_UPDATE_INTERVAL_MS) {
+      time_t rtcTime = readExternalRTC();
+      if (rtcTime > 1577836800) {  // Check if time is after 2020 (plausible timestamp)
+        lastPeriodicUpdateMs = nowMs;
+        setSystemClock(rtcTime);
+        LOG_DBG("CLK", "Systemtime has been taken from the hardware RTC");
+      }
+    }
+    return;
+  }
+
+  if (!isSynced()) {
+    return;
+  }
+  unsigned long nowMs = millis();
+  if (nowMs - lastPeriodicUpdateMs < PERIODIC_UPDATE_INTERVAL_MS) {
+    return;
+  }
+  lastPeriodicUpdateMs = nowMs;
+
+  // Compute temperature-corrected elapsed time since last baseline and apply
+  // only the drift delta (correction - raw) to the system clock. The kernel
+  // clock already advanced by the raw amount, so we must not re-add it.
+  uint64_t lpNow = esp_clk_rtc_time();
+  if (lpNow <= rtcLpTimeUs) {
+    return;
+  }
+
+  float tempNow = readChipTemperatureC();
+  double correctedSec = computeCorrectedElapsedSec(lpNow, tempNow);
+
+  // Raw elapsed seconds (what the kernel clock already counted).
+  uint64_t rawElapsedUs = lpNow - rtcLpTimeUs;
+  double rawSec = (double)rawElapsedUs / 1000000.0;
+
+  // The drift delta is the difference between what really elapsed
+  // (temperature-corrected) and what the kernel counted (raw).
+  double driftDeltaSec = correctedSec - rawSec;
+
+  // Re-baseline LP timer and temperature for the next interval.
+  rtcLpTimeUs = lpNow;
+  rtcSlowCal = esp_clk_slowclk_cal_get();
+  rtcTemperatureC = tempNow;
+
+  // Only nudge the system clock if the drift delta is meaningful (>50 ms).
+  // This avoids unnecessary settimeofday calls for negligible corrections.
+  if (std::fabs(driftDeltaSec) > 0.05) {
+    rtcEpoch = time(nullptr) + (time_t)driftDeltaSec;
+    setSystemClock(rtcEpoch);
+    LOG_DBG("CLK", "Periodic drift nudge: raw=%.3fs corr=%.3fs delta=%.3fs scale=%.3f", rawSec, correctedSec,
+            driftDeltaSec, rtcDriftScale);
+  }
+}
+
+bool isSynced() {
+  // Deliberately false for a stale restore even though the clock IS set. Every caller of this is
+  // asking "may I present or record this as the time?", and a lower bound is not that. Keeping
+  // the answer no preserves the previous behaviour exactly at all of them -- status bars, reading
+  // stats timestamps, updatePeriodic()'s drift nudge -- while time() itself now returns something
+  // usable for the machine checks that read it directly (isPlausibleForTls, cache TTLs).
+  return time(nullptr) > 1577836800 && !clockStaleRestore;  // > 2020-01-01
+}
+
+bool isApproximate() { return clockApproximate; }
+
+bool isPlausibleForTls() {
+  // Lower bound: comfortably after the newest curated root's notBefore, so any clock at or
+  // past it satisfies every one of them. Upper bound: the curated set's latest notAfter is
+  // 2038, so cap below that — a wildly-wrong FUTURE clock breaks notAfter just as effectively
+  // as 1970 breaks notBefore, and must also be treated as "needs SNTP".
+  constexpr time_t MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01 00:00:00 UTC
+  constexpr time_t MAX_PLAUSIBLE_EPOCH = 2114380800;  // 2037-01-01 00:00:00 UTC
+  const time_t nowEpoch = time(nullptr);
+  return nowEpoch >= MIN_PLAUSIBLE_EPOCH && nowEpoch < MAX_PLAUSIBLE_EPOCH;
+}
+
+bool ensureUsableForTls(const char* preferredServer) {
+  if (isPlausibleForTls()) {
+    // Deliberately no SNTP round-trip here even when the clock is only "approximate": the
+    // cert-date check passes anywhere inside the roots' validity window, so an NVS-restored
+    // clock that is hours out still verifies. Syncing anyway would cost ~5 s (and an
+    // intermittent timeout) on every cold start that already had a good-enough time, and would
+    // churn the heap right before the handshake's peak allocations.
+    return true;
+  }
+
+  // Rate-limit FAILED attempts instead of latching "attempted" forever. A one-shot latch means
+  // a single call made before the radio was ready disables the sync for the rest of the
+  // session, and every later TLS connect then fails to load its trust store with no way back.
+  constexpr unsigned long RETRY_MIN_INTERVAL_MS = 30000;
+  static unsigned long lastAttemptMs = 0;
+  static bool everAttempted = false;
+  const unsigned long nowMs = millis();
+  if (everAttempted && (nowMs - lastAttemptMs) < RETRY_MIN_INTERVAL_MS) {
+    return false;
+  }
+  everAttempted = true;
+  lastAttemptMs = nowMs;
+
+  LOG_INF("CLK", "Clock unset/implausible for TLS (epoch %lld); running SNTP before the handshake",
+          static_cast<long long>(time(nullptr)));
+  char err[64] = {0};
+  if (!syncNtp(err, sizeof(err), preferredServer)) {
+    LOG_ERR("CLK", "SNTP failed (%s) — the TLS trust store will not load until the clock is set", err);
+    return false;
+  }
+  LOG_INF("CLK", "SNTP complete; epoch now %lld", static_cast<long long>(time(nullptr)));
+  return isPlausibleForTls();
+}
+
+time_t lastSyncTime() { return nvsReadSyncTime(); }
+
+uint32_t lastSleepSeconds() { return lastSleepSec; }
+
+void formatTime(char* buf, size_t bufSize, bool use24h) {
+  if (!isSynced()) {
+    snprintf(buf, bufSize, "--:--");
+    return;
+  }
+
+  time_t t = time(nullptr);
+  struct tm timeinfo;
+  localtime_r(&t, &timeinfo);
+
+  const char* prefix = isApproximate() ? "~" : "";
+
+  if (use24h) {
+    snprintf(buf, bufSize, "%s%02d:%02d", prefix, timeinfo.tm_hour, timeinfo.tm_min);
+  } else {
+    int hour = timeinfo.tm_hour % 12;
+    if (hour == 0) hour = 12;
+    const char* ampm = timeinfo.tm_hour < 12 ? "AM" : "PM";
+    snprintf(buf, bufSize, "%s%d:%02d%s", prefix, hour, timeinfo.tm_min, ampm);
+  }
+}
+
+bool isStaleRestore() { return clockStaleRestore; }
+
+void formatLogTime(char* buf, size_t bufSize) {
+  if (!isSynced()) {
+    buf[0] = '\0';
+    return;
+  }
+
+  time_t t = time(nullptr);
+  struct tm timeinfo;
+  localtime_r(&t, &timeinfo);
+  snprintf(buf, bufSize, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+}
+
+void wifiOff(bool skipNtpSync) {
+  if (!skipNtpSync && isApproximate() && WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED) {
+    syncNtp();
+  }
+  if (esp_sntp_enabled()) {
+    esp_sntp_stop();
+  }
+  WiFi.disconnect(false);
+  delay(100);
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+}
+
+bool applyClientTime(time_t timestamp) {
+  // Validate bounds: [2020-01-01, 2100-01-01]
+  static constexpr time_t MIN_TIMESTAMP = 1577836800;  // 2020-01-01 UTC
+  static constexpr time_t MAX_TIMESTAMP = 4102444800;  // 2100-01-01 UTC
+
+  if (timestamp < MIN_TIMESTAMP || timestamp > MAX_TIMESTAMP) {
+    LOG_ERR("CLK", "Client time %lld out of bounds [%lld, %lld]", (long long)timestamp, (long long)MIN_TIMESTAMP,
+            (long long)MAX_TIMESTAMP);
+    return false;
+  }
+
+  // Only apply when SNTP is not active (clock not synced from network).
+  // NTP-synced time has priority and should never be overwritten by a client.
+  if (esp_sntp_enabled()) {
+    LOG_INF("CLK", "SNTP is active; not applying client time");
+    return false;
+  }
+
+  // If we're in STA mode (connected to WiFi as a regular station), don't apply
+  // client time — NTP sync is preferred and should happen soon.
+  if (WiFi.getMode() == WIFI_STA) {
+    LOG_INF("CLK", "In STA mode; not applying client time");
+    return false;
+  }
+
+  setSystemClock(timestamp);
+  clockApproximate = false;
+  rtcEpoch = timestamp;
+  LOG_INF("CLK", "Applied client time: %lld", (long long)timestamp);
+
+  // Persist to RTC if available (X3 only)
+  if (initExternalRTC()) {
+    writeExternalRTC(timestamp);
+    LOG_DBG("CLK", "Persisted client time to the hardware RTC");
+  }
+
+  // Also persist to NVS
+  nvsWrite(timestamp);
+  nvsWriteSyncTime(timestamp);
+
+  return true;
+}
+
+}  // namespace HalClock

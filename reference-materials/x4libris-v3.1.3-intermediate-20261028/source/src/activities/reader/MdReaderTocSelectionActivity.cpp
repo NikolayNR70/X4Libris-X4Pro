@@ -1,0 +1,117 @@
+#include "MdReaderTocSelectionActivity.h"
+
+#include <GfxRenderer.h>
+#include <I18n.h>
+
+#include <algorithm>
+
+#include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
+#include "fontIds.h"
+
+int MdReaderTocSelectionActivity::getTotalItems() const { return static_cast<int>(headings.size()); }
+
+int MdReaderTocSelectionActivity::getPageItems() const {
+  constexpr int lineHeight = 30;
+  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const int startY = 60 + contentRect.y;
+  const int availableHeight = contentRect.y + contentRect.height - startY - lineHeight;
+  return std::max(1, availableHeight / lineHeight);
+}
+
+void MdReaderTocSelectionActivity::onEnter() {
+  Activity::onEnter();
+
+  if (selectorIndex < 0 || selectorIndex >= getTotalItems()) {
+    selectorIndex = 0;
+  }
+
+  requestUpdate();
+}
+
+void MdReaderTocSelectionActivity::onExit() { Activity::onExit(); }
+
+void MdReaderTocSelectionActivity::loop() {
+  const int pageItems = getPageItems();
+  const int totalItems = getTotalItems();
+
+  ButtonEventManager::ButtonEvent ev;
+  while (buttonEvents.consumeEvent(ev)) {
+    if (ev.button == MappedInputManager::Button::Confirm && ev.type == ButtonEventManager::PressType::Short) {
+      if (selectorIndex >= 0 && selectorIndex < totalItems) {
+        setResult(PageResult{static_cast<uint32_t>(headings[selectorIndex].pageIndex)});
+      } else {
+        ActivityResult result;
+        result.isCancelled = true;
+        setResult(std::move(result));
+      }
+      finish();
+      return;
+    }
+
+    if (ev.button == MappedInputManager::Button::Back && ev.type == ButtonEventManager::PressType::Short) {
+      ActivityResult result;
+      result.isCancelled = true;
+      setResult(std::move(result));
+      finish();
+      return;
+    }
+  }
+
+  // Up/Down step one chapter, Left/Right jump a screenful — a book with hundreds of chapters is
+  // otherwise only crossable by holding a button down.
+  buttonNavigator.onNextList(selectorIndex, totalItems, [this] { requestUpdate(); }, pageItems);
+  buttonNavigator.onPreviousList(selectorIndex, totalItems, [this] { requestUpdate(); }, pageItems);
+}
+
+void MdReaderTocSelectionActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+  const int pageItems = getPageItems();
+  const int totalItems = getTotalItems();
+
+  const int titleX =
+      contentRect.x +
+      (contentRect.width - renderer.getTextWidth(UI_12_FONT_ID, tr(STR_SELECT_CHAPTER), EpdFontFamily::BOLD)) / 2;
+  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentRect.y, tr(STR_SELECT_CHAPTER), true, EpdFontFamily::BOLD);
+
+  const int pageStartIndex = selectorIndex / pageItems * pageItems;
+  renderer.fillRect(contentRect.x, 60 + contentRect.y + (selectorIndex % pageItems) * 30 - 2, contentRect.width - 1,
+                    30);
+
+  // Rows published for touch — same numbers as the fill above, band top at the fill's y.
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, 60 + contentRect.y - 2, 30, pageStartIndex,
+                                   std::min(pageItems, totalItems - pageStartIndex));
+
+  for (int i = 0; i < pageItems; i++) {
+    int itemIndex = pageStartIndex + i;
+    if (itemIndex >= totalItems) break;
+    const int displayY = 60 + contentRect.y + i * 30;
+    const bool isSelected = (itemIndex == selectorIndex);
+
+    const auto& heading = headings[itemIndex];
+    const int indentRelative = 20 + (heading.level - 1) * 10;
+    const int drawX = contentRect.x + indentRelative;
+    const std::string title =
+        renderer.truncatedText(UI_10_FONT_ID, heading.title.c_str(), contentRect.width - 40 - indentRelative);
+    renderer.drawText(UI_10_FONT_ID, drawX, displayY, title.c_str(), !isSelected);
+  }
+
+  // Left/Right page when there is more than one page to cross, and fall back to stepping (which is
+  // what ButtonNavigator::nextPageIndex does on a short list) when there is not.
+  const bool pages = totalItems > pageItems;
+  // Paging rides logical Left/Right and stepping logical Up/Down, so which pair sits on the front
+  // strip and which on the side buttons is the orientation's business — mapHints routes both sets
+  // of labels to whichever buttons are doing the job.
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), pages ? tr(STR_LIST_PAGE_PREV) : "",
+                                          pages ? tr(STR_LIST_PAGE_NEXT) : "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
+
+  renderer.displayBuffer();
+}
+
+ListRowTap::Result MdReaderTocSelectionActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, getTotalItems(), selectorIndex);
+}

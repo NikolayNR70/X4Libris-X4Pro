@@ -1,0 +1,462 @@
+// malloc/free/calloc/realloc overrides with a size header word, tracking live
+// and peak bytes. Adapted from test/epub_benchmark/EpubParserBenchmark.cpp
+// (same technique, stripped to the Linux/glibc path plus the Windows branch).
+#include "HeapTrack.h"
+
+#include <atomic>
+#include <cstdlib>
+#include <cstring>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#include <execinfo.h>
+// Weak fallbacks must have external linkage — inside the anonymous namespace
+// they'd become (undefined) internal symbols instead of binding to glibc.
+extern "C" void* __libc_malloc(size_t) __attribute__((weak));
+extern "C" void __libc_free(void*) __attribute__((weak));
+#endif
+
+namespace {
+
+// One stack walk, two platforms. glibc's backtrace() is not in MinGW; the Windows runtime has
+// RtlCaptureStackBackTrace, which needs no unwind tables and does not allocate. Without this the
+// whole heap-profiling tool simply did not build on Windows, which is why the memory questions in
+// this codebase have been answered from device logs rather than from a profile.
+int captureFrames(void** frames, const int count) {
+#if defined(_WIN32)
+  return static_cast<int>(RtlCaptureStackBackTrace(0, static_cast<ULONG>(count), frames, nullptr));
+#else
+  return backtrace(frames, count);
+#endif
+}
+
+std::atomic<size_t> g_liveBytes{0};
+std::atomic<size_t> g_peakBytes{0};
+std::atomic<size_t> g_allocCount{0};
+constexpr int kSizeBucketCount = 12;
+std::atomic<size_t> g_sizeBuckets[kSizeBucketCount];
+std::atomic<bool> g_tracking{false};
+thread_local bool g_inHook = false;
+
+// Caller attribution. The size histogram says WHICH SIZE CLASSES dominate the count but not
+// WHERE they come from, and on a no-compaction heap the "where" is what you have to change.
+// Open-addressed fixed table because this runs inside the malloc hook: any allocation here
+// would recurse. Collisions past the probe limit are dropped -- this is a profile, not a ledger.
+constexpr int kSiteSlots = 4096;
+std::atomic<uintptr_t> g_siteAddr[kSiteSlots];
+std::atomic<size_t> g_siteCount[kSiteSlots];
+std::atomic<size_t> g_siteBytes[kSiteSlots];
+// Cumulative bytes answer "who allocates a lot", which on a churning parser is nearly always the
+// per-word string traffic and nearly always the wrong thing to change. What a 380 KB device
+// actually runs out of is LIVE bytes at one instant, so this tracks those per site too, and
+// snapshots the table whenever a new peak is set: g_peakSiteLive is then "who was holding the
+// memory at the high-water mark", which is the question a fix has to answer.
+std::atomic<size_t> g_siteLive[kSiteSlots];
+std::atomic<size_t> g_peakSiteLive[kSiteSlots];
+std::atomic<size_t> g_siteMax[kSiteSlots];
+std::atomic<size_t> g_peakSnapshotBytes{0};
+
+// Per-build window (see HeapTrack.h).
+std::atomic<bool> g_winActive{false};
+std::atomic<size_t> g_winBase{0};
+std::atomic<size_t> g_winPeak{0};
+std::atomic<size_t> g_winSnapLive{0};
+std::atomic<size_t> g_winEnd{0};
+std::atomic<size_t> g_phasePeak{0};
+constexpr size_t kWindowSnapStep = 128;
+std::atomic<size_t> g_winStartLive[kSiteSlots];
+std::atomic<size_t> g_winPeakLive[kSiteSlots];
+std::atomic<size_t> g_winEndLive[kSiteSlots];
+std::atomic<size_t> g_winCount[kSiteSlots];
+std::atomic<size_t> g_winBytes[kSiteSlots];
+std::atomic<uintptr_t> g_siteCtx1[kSiteSlots];
+std::atomic<uintptr_t> g_siteCtx2[kSiteSlots];
+void (*g_winPeakCallback)() = nullptr;
+
+// Sites are keyed by (pc, caller) when HEAPTRACK_SITE_BY_CALLER=1 (the inventory tool): a shared
+// helper that allocates for many callers -- SaxParser::init for every SAX user -- would otherwise
+// be ONE site labelled with whichever caller claimed it first (a container.xml parse at book load
+// showed up inside a chapter build that way). By default the key is the pc alone, as before.
+bool siteByCaller() {
+  static const bool v = [] {
+    const char* e = getenv("HEAPTRACK_SITE_BY_CALLER");
+    return e != nullptr && e[0] == '1';
+  }();
+  return v;
+}
+
+int trackSite(const uintptr_t pc, const size_t sz, const uintptr_t ctx1 = 0, const uintptr_t ctx2 = 0) {
+  if (pc == 0) return -1;
+  // Two caller frames, not one: shared helpers nest (every ZIP open goes through one scoped
+  // opener), so the caller's caller is what tells the uses apart.
+  const bool byCaller = siteByCaller();
+  const uintptr_t keyCtx = byCaller ? ctx1 : 0;
+  const uintptr_t keyCtx2 = byCaller ? ctx2 : 0;
+  size_t h =
+      ((pc ^ (keyCtx * 0x2545F4914F6CDD1Dull) ^ (keyCtx2 * 0x9E3779B97F4A7C15ull)) * 0x9E3779B97F4A7C15ull) >> 49;
+  for (int probe = 0; probe < 32; ++probe) {
+    const size_t slot = (h + probe) & (kSiteSlots - 1);
+    uintptr_t cur = g_siteAddr[slot].load(std::memory_order_relaxed);
+    if (cur == 0) {
+      uintptr_t expected = 0;
+      if (!g_siteAddr[slot].compare_exchange_strong(expected, pc, std::memory_order_relaxed)) {
+        if (expected != pc) continue;  // lost the race to a different site; keep probing
+      }
+      cur = pc;
+      g_siteCtx1[slot].store(ctx1, std::memory_order_relaxed);
+      g_siteCtx2[slot].store(ctx2, std::memory_order_relaxed);
+    }
+    if (cur == pc && (!byCaller || (g_siteCtx1[slot].load(std::memory_order_relaxed) == keyCtx &&
+                                    g_siteCtx2[slot].load(std::memory_order_relaxed) == keyCtx2))) {
+      if (g_siteCtx1[slot].load(std::memory_order_relaxed) == 0 && ctx1 != 0) {
+        g_siteCtx1[slot].store(ctx1, std::memory_order_relaxed);
+        g_siteCtx2[slot].store(ctx2, std::memory_order_relaxed);
+      }
+      if (g_winActive.load(std::memory_order_relaxed)) {
+        g_winCount[slot].fetch_add(1, std::memory_order_relaxed);
+        g_winBytes[slot].fetch_add(sz, std::memory_order_relaxed);
+      }
+      g_siteCount[slot].fetch_add(1, std::memory_order_relaxed);
+      g_siteBytes[slot].fetch_add(sz, std::memory_order_relaxed);
+      g_siteLive[slot].fetch_add(sz, std::memory_order_relaxed);
+      size_t prevMax = g_siteMax[slot].load(std::memory_order_relaxed);
+      while (sz > prevMax && !g_siteMax[slot].compare_exchange_weak(prevMax, sz, std::memory_order_relaxed)) {
+      }
+      return static_cast<int>(slot);
+    }
+  }
+  // Every probe collided: this allocation goes unattributed, as the comment above says. It still
+  // has to say so -- falling off the end of an int function is undefined, and the caller stores
+  // whatever it gets in the allocation header and hands it back to free().
+  return -1;
+}
+
+int trackAlloc(size_t sz) {
+  if (!g_tracking || g_inHook) return -1;
+  g_allocCount.fetch_add(1, std::memory_order_relaxed);
+  // Size histogram: which allocations dominate the count is not obvious from the code — the
+  // ones that fragment a no-compaction heap are not necessarily the ones you notice reading it.
+  // Buckets are powers of two: [0]=<=16B, [1]=<=32B, ... [11]=>16KB.
+  size_t bucket = 0;
+  for (size_t limit = 16; bucket < 11 && sz > limit; limit <<= 1) bucket++;
+  g_sizeBuckets[bucket].fetch_add(1, std::memory_order_relaxed);
+  const size_t live = g_liveBytes.fetch_add(sz) + sz;
+  size_t peak = g_peakBytes.load(std::memory_order_relaxed);
+  while (live > peak && !g_peakBytes.compare_exchange_weak(peak, live, std::memory_order_relaxed)) {
+  }
+  // Walk out to the first frame above the allocator itself -- the line of application code that
+  // wanted the memory, which is the level a fix has to act on. __builtin_return_address(n>0) is
+  // documented as unreliable without frame pointers and segfaulted here; backtrace() uses unwind
+  // info instead. It can allocate internally, so the hook guard must be held across the call.
+  g_inHook = true;
+  void* frames[12] = {};
+  const int depth = captureFrames(frames, 12);
+  // 0 = trackAlloc, 1 = the malloc/new override, 2 = libstdc++ operator new for C++ allocations.
+  // Take the first frame that lies outside this translation unit's address range by preferring
+  // the deepest available, which is the application for both C and C++ paths.
+  // Which frame is the application depends on how much of the allocator got inlined and on the
+  // stack walker: the 3 that suited glibc backtrace() lands inside the CRT under
+  // RtlCaptureStackBackTrace. Overridable so the right depth can be found by sweeping rather than
+  // guessed -- attributed bytes summing to a fraction of the peak is the symptom of a wrong pick.
+  static const int kPick = [] {
+    if (const char* e = getenv("HEAPTRACK_FRAME")) {
+      const int v = atoi(e);
+      if (v > 0 && v < 12) return v;
+    }
+    return 3;
+  }();
+  int pick = depth > kPick ? kPick : depth - 1;
+#if !defined(_WIN32)
+  // HEAPTRACK_SKIP_ALLOCATORS=1 (the inventory tool): instead of a fixed depth, take the first
+  // frame above the allocator itself -- skipping this file's hooks and libstdc++'s operator new /
+  // new[] by symbol -- so a direct malloc() caller and an operator-new caller are both attributed
+  // to the application line that asked. A fixed depth is one frame too high for the former.
+  static const bool kSkipAllocators = [] {
+    const char* e = getenv("HEAPTRACK_SKIP_ALLOCATORS");
+    return e != nullptr && e[0] == '1';
+  }();
+  if (kSkipAllocators) {
+    pick = depth - 1;
+    for (int i = 1; i < depth; ++i) {
+      Dl_info di{};
+      const char* name = (dladdr(frames[i], &di) != 0 && di.dli_sname != nullptr) ? di.dli_sname : "";
+      const bool allocator = std::strncmp(name, "_Zn", 3) == 0 || std::strcmp(name, "malloc") == 0 ||
+                             std::strcmp(name, "calloc") == 0 || std::strcmp(name, "realloc") == 0 ||
+                             std::strstr(name, "trackAlloc") != nullptr;
+      if (!allocator) {
+        pick = i;
+        break;
+      }
+    }
+  }
+#endif
+  const uintptr_t pc = pick >= 0 ? reinterpret_cast<uintptr_t>(frames[pick]) : 0;
+  const uintptr_t ctx1 = pick + 1 < depth ? reinterpret_cast<uintptr_t>(frames[pick + 1]) : 0;
+  const uintptr_t ctx2 = pick + 2 < depth ? reinterpret_cast<uintptr_t>(frames[pick + 2]) : 0;
+  g_inHook = false;
+  const int slot = trackSite(pc, sz, ctx1, ctx2);
+
+  // Window bookkeeping: the phase peak, and a site snapshot each time the window's own peak grows
+  // by a step (fine-grained: a background build's whole margin is a few KB).
+  {
+    size_t pp = g_phasePeak.load(std::memory_order_relaxed);
+    while (live > pp && !g_phasePeak.compare_exchange_weak(pp, live, std::memory_order_relaxed)) {
+    }
+  }
+  if (g_winActive.load(std::memory_order_relaxed)) {
+    size_t wp = g_winPeak.load(std::memory_order_relaxed);
+    while (live > wp && !g_winPeak.compare_exchange_weak(wp, live, std::memory_order_relaxed)) {
+    }
+    if (live > g_winSnapLive.load(std::memory_order_relaxed) + kWindowSnapStep ||
+        live == g_winPeak.load(std::memory_order_relaxed)) {
+      if (live > g_winSnapLive.load(std::memory_order_relaxed)) {
+        g_winSnapLive.store(live, std::memory_order_relaxed);
+        for (int i = 0; i < kSiteSlots; ++i) {
+          g_winPeakLive[i].store(g_siteLive[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+        // The allocation that set this peak is already counted in its site's live bytes above.
+        if (g_winPeakCallback) {
+          g_inHook = true;
+          g_winPeakCallback();
+          g_inHook = false;
+        }
+      }
+    }
+  }
+
+  // Snapshot who is holding memory whenever the high-water mark moves meaningfully. Copying 4096
+  // slots is far too expensive to do on every new peak -- early in a run almost every allocation
+  // sets one -- so it only runs once the peak has grown by a bucket's worth since the last
+  // snapshot. The result trails the true peak by at most that much.
+  constexpr size_t kSnapshotStepBytes = 4096;
+  const size_t snapped = g_peakSnapshotBytes.load(std::memory_order_relaxed);
+  if (live > snapped + kSnapshotStepBytes) {
+    size_t expected = snapped;
+    if (g_peakSnapshotBytes.compare_exchange_strong(expected, live, std::memory_order_relaxed)) {
+      for (int i = 0; i < kSiteSlots; ++i) {
+        g_peakSiteLive[i].store(g_siteLive[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+      }
+    }
+  }
+  return slot;
+}
+void trackFree(size_t sz, int slot) {
+  if (!g_tracking || g_inHook) return;
+  g_liveBytes.fetch_sub(sz, std::memory_order_relaxed);
+  if (slot >= 0 && slot < kSiteSlots) g_siteLive[slot].fetch_sub(sz, std::memory_order_relaxed);
+}
+
+constexpr size_t kAlign = alignof(std::max_align_t);
+// The header carries the allocation's size AND the site slot that claimed it, so free() can
+// return the bytes to the same site rather than only to the global total. Without the second
+// field per-site numbers could only ever grow, which is the cumulative view that misleads.
+struct Header {
+  size_t size;
+  size_t slot;  // +1 biased so 0 means "unattributed"
+};
+constexpr size_t kHeaderSize = (sizeof(Header) + kAlign - 1) & ~(kAlign - 1);
+
+void* rawAlloc(size_t bytes) {
+#if defined(_WIN32)
+  return HeapAlloc(GetProcessHeap(), 0, bytes);
+#else
+  using malloc_fn_t = void* (*)(size_t);
+  static malloc_fn_t realMalloc = nullptr;
+  if (!realMalloc) {
+    realMalloc = reinterpret_cast<malloc_fn_t>(dlsym(RTLD_NEXT, "malloc"));
+    if (!realMalloc) realMalloc = __libc_malloc;
+  }
+  return realMalloc ? realMalloc(bytes) : nullptr;
+#endif
+}
+void rawFree(void* p) {
+#if defined(_WIN32)
+  HeapFree(GetProcessHeap(), 0, p);
+#else
+  using free_fn_t = void (*)(void*);
+  static free_fn_t realFree = nullptr;
+  if (!realFree) {
+    realFree = reinterpret_cast<free_fn_t>(dlsym(RTLD_NEXT, "free"));
+    if (!realFree) realFree = __libc_free;
+  }
+  if (realFree) realFree(p);
+#endif
+}
+
+}  // namespace
+
+extern "C" {
+
+void* malloc(size_t size) {
+  if (g_inHook) return rawAlloc(kHeaderSize + size);
+  g_inHook = true;
+  void* raw = rawAlloc(kHeaderSize + size);
+  g_inHook = false;
+  if (!raw) return nullptr;
+  const int slot = trackAlloc(size);
+  auto* h = static_cast<Header*>(raw);
+  h->size = size;
+  h->slot = slot >= 0 ? static_cast<size_t>(slot) + 1 : 0;
+  return static_cast<char*>(raw) + kHeaderSize;
+}
+
+void free(void* ptr) {
+  if (!ptr) return;
+  if (g_inHook) {
+    rawFree(ptr);
+    return;
+  }
+  void* raw = static_cast<char*>(ptr) - kHeaderSize;
+  const auto* h = static_cast<const Header*>(raw);
+  const size_t size = h->size;
+  trackFree(size, h->slot > 0 ? static_cast<int>(h->slot) - 1 : -1);
+  g_inHook = true;
+  rawFree(raw);
+  g_inHook = false;
+}
+
+void* calloc(size_t nmemb, size_t size) {
+  const size_t total = nmemb * size;
+  void* p = malloc(total);
+  if (p) memset(p, 0, total);
+  return p;
+}
+
+void* realloc(void* ptr, size_t size) {
+  if (!ptr) return malloc(size);
+  void* raw = static_cast<char*>(ptr) - kHeaderSize;
+  const size_t oldSize = static_cast<const Header*>(raw)->size;
+  void* np = malloc(size);
+  if (!np) return nullptr;
+  memcpy(np, ptr, oldSize < size ? oldSize : size);
+  free(ptr);
+  return np;
+}
+
+}  // extern "C"
+
+void heapTrackBegin() {
+  // backtrace() lazily initialises (and allocates) on first use; do it before the
+  // hook is live so that initialisation is not itself profiled or recursed into.
+  void* warm[4];
+  (void)captureFrames(warm, 4);
+  g_liveBytes.store(0);
+  g_peakBytes.store(0);
+  g_peakSnapshotBytes.store(0);
+  g_allocCount.store(0);
+  for (int i = 0; i < kSiteSlots; ++i) {
+    g_siteLive[i].store(0);
+    g_peakSiteLive[i].store(0);
+  }
+  for (auto& b : g_sizeBuckets) b.store(0);
+  g_tracking.store(true);
+}
+
+size_t heapTrackEnd() {
+  g_tracking.store(false);
+  return g_peakBytes.load();
+}
+
+size_t heapTrackAllocCount() { return g_allocCount.load(); }
+
+size_t heapTrackPeakSoFar() { return g_peakBytes.load(std::memory_order_relaxed); }
+
+void heapTrackSizeHistogram(size_t* out, const int count) {
+  for (int i = 0; i < count && i < kSizeBucketCount; i++) out[i] = g_sizeBuckets[i].load();
+}
+
+void heapTrackPause() { g_tracking.store(false); }
+void heapTrackResume() { g_tracking.store(true); }
+
+int heapTrackTopSites(HeapTrackSite* out, const int count) {
+  if (out == nullptr || count <= 0) return 0;
+  int n = 0;
+  for (int slot = 0; slot < kSiteSlots && n < count; ++slot) {
+    const size_t c = g_siteCount[slot].load(std::memory_order_relaxed);
+    if (c == 0) continue;
+    out[n].pc = g_siteAddr[slot].load(std::memory_order_relaxed);
+    out[n].count = c;
+    out[n].bytes = g_siteBytes[slot].load(std::memory_order_relaxed);
+    out[n].peakLive = g_peakSiteLive[slot].load(std::memory_order_relaxed);
+    out[n].maxSize = g_siteMax[slot].load(std::memory_order_relaxed);
+    ++n;
+  }
+  // Descending by what the site was HOLDING at the peak; n is a few hundred at most, so an
+  // insertion sort is ample.
+  for (int i = 1; i < n; ++i) {
+    HeapTrackSite key = out[i];
+    int j = i - 1;
+    while (j >= 0 && out[j].peakLive < key.peakLive) {
+      out[j + 1] = out[j];
+      --j;
+    }
+    out[j + 1] = key;
+  }
+  return n;
+}
+
+void heapTrackWindowBegin() {
+  for (int i = 0; i < kSiteSlots; ++i) {
+    g_winStartLive[i].store(g_siteLive[i].load());
+    g_winPeakLive[i].store(g_siteLive[i].load());
+    g_winEndLive[i].store(0);
+    g_winCount[i].store(0);
+    g_winBytes[i].store(0);
+  }
+  const size_t live = g_liveBytes.load();
+  g_winBase.store(live);
+  g_winPeak.store(live);
+  g_winSnapLive.store(live);
+  g_winEnd.store(live);
+  g_phasePeak.store(live);
+  g_winActive.store(true);
+}
+
+void heapTrackWindowEnd() {
+  g_winActive.store(false);
+  for (int i = 0; i < kSiteSlots; ++i) g_winEndLive[i].store(g_siteLive[i].load());
+  g_winEnd.store(g_liveBytes.load());
+}
+
+size_t heapTrackLive() { return g_liveBytes.load(std::memory_order_relaxed); }
+
+HeapTrackWindowSummary heapTrackWindowSummary() {
+  HeapTrackWindowSummary s;
+  s.base = g_winBase.load();
+  s.peak = g_winPeak.load();
+  s.atSnap = g_winSnapLive.load();
+  s.end = g_winEnd.load();
+  return s;
+}
+
+size_t heapTrackPhaseMark() {
+  const size_t peak = g_phasePeak.load();
+  g_phasePeak.store(g_liveBytes.load());
+  return peak;
+}
+
+void heapTrackSetWindowPeakCallback(void (*callback)()) { g_winPeakCallback = callback; }
+
+int heapTrackWindowSites(HeapTrackWindowSite* out, const int count) {
+  if (out == nullptr || count <= 0) return 0;
+  int n = 0;
+  for (int slot = 0; slot < kSiteSlots && n < count; ++slot) {
+    if (g_siteAddr[slot].load() == 0) continue;
+    HeapTrackWindowSite w;
+    w.pc = g_siteAddr[slot].load();
+    w.ctx1 = g_siteCtx1[slot].load();
+    w.ctx2 = g_siteCtx2[slot].load();
+    w.winCount = g_winCount[slot].load();
+    w.winBytes = g_winBytes[slot].load();
+    w.startLive = g_winStartLive[slot].load();
+    w.peakLive = g_winPeakLive[slot].load();
+    w.endLive = g_winEndLive[slot].load();
+    w.maxSize = g_siteMax[slot].load();
+    if (w.winCount == 0 && w.startLive == 0 && w.peakLive == 0 && w.endLive == 0) continue;
+    out[n++] = w;
+  }
+  return n;
+}

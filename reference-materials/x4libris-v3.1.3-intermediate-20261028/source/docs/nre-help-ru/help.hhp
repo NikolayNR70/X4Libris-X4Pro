@@ -1,0 +1,36 @@
+[OPTIONS]
+Compatibility=1.1 or later
+Compiled file=X4Libris-X4Pro-v3.1.1-help.chm
+Contents file=contents.hhc
+Index file=index.hhk
+Default topic=index.html
+Display compile progress=Yes
+Full-text search=Yes
+Language=0x419 Russian
+Title=X4Libris X4 Pro v3.1.1 Help
+Default Window=main
+
+[WINDOWS]
+main="X4Libris X4 Pro v3.1.1 Help","contents.hhc","index.hhk","index.html","index.html",,,,,0x63520,250,0x104e,[80,60,1150,850],0x0,0x0,,,,0
+
+[FILES]
+index.html
+apps.html
+style.css
+overview.html
+changes.html
+fb2.html
+epub.html
+menu.html
+fonts.html
+paragraphs.html
+headings.html
+page.html
+more.html
+hyphens.html
+touch.html
+buttons.html
+rollback.html
+install.html
+limits.html
+checks.html

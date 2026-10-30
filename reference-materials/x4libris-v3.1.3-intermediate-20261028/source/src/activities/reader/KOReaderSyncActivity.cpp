@@ -1,0 +1,1422 @@
+#include "KOReaderSyncActivity.h"
+
+#include <FontCacheManager.h>
+#include <GfxRenderer.h>
+#include <HalClock.h>
+#include <HalStorage.h>
+#include <I18n.h>
+#include <Logging.h>
+#include <WiFi.h>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
+#include <esp_wifi.h>
+
+#include <cmath>
+#include <new>
+
+#include "CrossPointSettings.h"
+#include "KOReaderAutoSync.h"
+#include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
+#include "KOReaderSyncMetadata.h"
+#include "KOReaderSyncWorker.h"
+#include "MappedInputManager.h"
+#include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
+#include "components/UITheme.h"
+#include "components/themes/ListTouchBand.h"
+#include "fontIds.h"
+
+namespace {
+constexpr time_t NTP_RESYNC_MIN_INTERVAL_SEC = 15 * 60;
+
+// Our last push of the book, beside its progress.bin (LastPushCache.h).
+constexpr const char* LAST_PUSH_FILE = "/kosync_push.bin";
+
+// The encoded record is ~240 bytes, past what a loop-task frame should hold; one heap block for it.
+struct LastPushBytes {
+  uint8_t bytes[LastPush::kMaxEncoded];
+};
+
+// Emits heap snapshots around sync stages so we can correlate TLS failures with
+// fragmentation and not just total free heap.
+void logSyncMemSnapshot(const char* stage) {
+  const uint32_t freeHeap = esp_get_free_heap_size();
+  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  LOG_DBG("KOSync", "Sync mem[%s]: free=%lu contig=%lu", stage, freeHeap, contigHeap);
+}
+
+// Freshness policy, on top of HalClock::ensureUsableForTls()'s correctness floor. The floor
+// guarantees "inside the certs' validity window", which is genuinely all the SYNC needs: the
+// upload carries no timestamp (updateProgress() sends document/progress/percentage/device/
+// device_id and the server stamps the record), and the timestamp the server returns is parsed
+// into KOReaderProgress::timestamp and never read. An earlier version of this comment claimed
+// the freshness policy kept an uploaded timestamp from drifting; there is no such timestamp.
+//
+// What it is actually for is the device clock everything ELSE reads -- the status bar, reading
+// stats, cache ages -- for which a network session is simply the only chance to correct it. That
+// is worth keeping while HalClock::syncNtp()'s fast path costs ~20 ms; it would not be worth a
+// multi-second stall. Note the two guards answer different questions: an unset clock reads as
+// `now <= 0` here, but it is ensureUsableForTls() that makes the handshake possible at all, so
+// this must never be the only guard before a TLS call.
+bool shouldSyncNtpNow() {
+  const time_t lastSync = HalClock::lastSyncTime();
+  const time_t now = HalClock::now();
+  if (lastSync <= 0 || now <= 0) {
+    return true;
+  }
+
+  const time_t age = now - lastSync;
+  if (age < 0) {
+    return true;
+  }
+  return age >= NTP_RESYNC_MIN_INTERVAL_SEC;
+}
+}  // namespace
+
+void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
+  if (!success) {
+    LOG_DBG("KOSync", "WiFi connection failed, resuming reader");
+    resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+    return;
+  }
+
+  LOG_DBG("KOSync", "WiFi connected, starting sync");
+  // Keep the station fully awake for the sync transaction. Modem sleep parks the radio
+  // between DTIM beacons and can stall a request for seconds, which arrives here as an HTTP
+  // timeout on what is otherwise a few small round trips. The web server already does this
+  // for the same reason. WiFi is torn down when this activity exits, so the cost is bounded
+  // by the sync itself.
+  // Ported from crosspoint-reader PR #3233 (Jadehawk / @jadehawk).
+  WiFi.setSleep(false);
+  LOG_DBG("KOSync", "WiFi sleep disabled for sync");
+
+  // Push the current setting before any request: the library cannot read SETTINGS,
+  // and the value may have changed since boot.
+  KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
+
+  {
+    RenderLock lock(*this);
+    state = SYNCING;
+    statusMessage = tr(STR_SYNCING_TIME);
+  }
+  requestUpdate();
+
+  // Avoid repeated NTP churn during rapid sync retries; it can fragment heap
+  // right before TLS. Re-sync only when clock is stale.
+  if (shouldSyncNtpNow()) {
+    HalClock::syncNtp(SETTINGS.ntpServer);
+  } else {
+    LOG_DBG("KOSync", "Skipping NTP sync (recently synced)");
+  }
+  // Independent of the freshness policy above: guarantee the clock is at least inside the
+  // certificate validity window, or the trust store will not load. Cheap when the sync above
+  // just ran (one time() comparison) and it is what makes this path's safety deliberate rather
+  // than a side effect of shouldSyncNtpNow() happening to return true on an unset clock.
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
+
+  {
+    RenderLock lock(*this);
+    statusMessage = tr(STR_CALC_HASH);
+  }
+  requestUpdate();
+
+  logSyncMemSnapshot("before_performSync");
+  trimMemoryForNetworkSession(renderer, "KOSync");
+  logSyncMemSnapshot("after_trim_before_performSync");
+
+  performSync();
+
+  logSyncMemSnapshot("after_performSync");
+}
+
+std::string KOReaderSyncActivity::hashForMethod(const DocumentMatchMethod method) const {
+  return method == DocumentMatchMethod::FILENAME ? KOReaderDocumentId::calculateFromFilename(epubPath)
+                                                 : KOReaderDocumentId::calculate(epubPath);
+}
+
+const char* KOReaderSyncActivity::matchMethodName(const DocumentMatchMethod method) {
+  return method == DocumentMatchMethod::FILENAME ? "filename" : "binary";
+}
+
+bool KOReaderSyncActivity::calculateDocumentHash() {
+  // A previous sync may have proved the server holds this book under the other method's id
+  // (KOReader defaults to binary, we default to filename). That is a fact about the server,
+  // so it outranks the local preference for both reads and writes.
+  const auto learned = KOReaderDocumentId::loadLearnedMatchMethod(epubPath);
+  effectiveMatchMethod = learned.value_or(KOREADER_STORE.getMatchMethod());
+  if (learned) {
+    LOG_DBG("KOSync", "Using learned %s document id for this book", matchMethodName(effectiveMatchMethod));
+  }
+
+  documentHash = hashForMethod(effectiveMatchMethod);
+  if (documentHash.empty()) {
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = tr(STR_HASH_FAILED);
+    }
+    requestUpdate(true);
+    return false;
+  }
+
+  LOG_DBG("KOSync", "Document hash (%s): %s", matchMethodName(effectiveMatchMethod), documentHash.c_str());
+  return true;
+}
+
+void KOReaderSyncActivity::applyRemoteAndFinish() {
+  // Preserve the apply result and show explicit confirmation before returning
+  // to the reader so users can tell the remote position was taken.
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  AUTOSYNC_STATE.markSynced(epubPath, remotePosition.spineIndex, remotePosition.pageNumber);
+#endif
+  auto& sync = APP_STATE.koReaderSyncSession;
+  sync.outcome = KOReaderSyncOutcomeState::APPLIED_REMOTE;
+  sync.resultSpineIndex = remotePosition.spineIndex;
+  sync.resultPage = remotePosition.pageNumber;
+  sync.resultParagraphIndex = remotePosition.paragraphIndex;
+  sync.resultHasParagraphIndex = remotePosition.hasParagraphIndex;
+  sync.resultListItemIndex = remotePosition.listItemIndex;
+  sync.resultHasListItemIndex = remotePosition.hasListItemIndex;
+  sync.resultVisibleOffset = remotePosition.visibleTextOffset;
+  sync.resultHasVisibleOffset = remotePosition.hasVisibleTextOffset;
+  LOG_INF("KOSync", "Applying remote position: spine=%d page=%d/%d hasOffset=%d offset=%lu hasParagraph=%d p=%u",
+          remotePosition.spineIndex, remotePosition.pageNumber, totalPagesInSpine,
+          remotePosition.hasVisibleTextOffset ? 1 : 0, static_cast<unsigned long>(remotePosition.visibleTextOffset),
+          remotePosition.hasParagraphIndex ? 1 : 0, remotePosition.paragraphIndex);
+  APP_STATE.saveToFile();
+
+  if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
+    // Auto-pull skips the success-screen dwell — the reader will render the new
+    // position immediately, which is the only visible feedback the user needs.
+    // (The radio is already down: a pull maps with it off.)
+    resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
+    return;
+  }
+  {
+    RenderLock lock(*this);
+    state = APPLY_COMPLETE;
+    uploadCompleteTime = millis();
+  }
+  requestUpdate(true);
+}
+
+LocalReadingPosition KOReaderSyncActivity::localReadingPosition() const {
+  LocalReadingPosition local;
+  local.spineIndex = currentSpineIndex;
+  local.page = currentPage;
+  local.paragraphAtPageEnd = hasLocalParagraphIndex ? localParagraphIndex : 0;
+  local.paragraphAtPreviousPageEnd = localParagraphIndexBefore;
+  local.visibleOffsetAtPage = localVisibleOffsetAtPage;
+  local.visibleOffsetAtNextPage = localVisibleOffsetAtNextPage;
+  local.hasVisibleOffset = hasLocalVisibleOffset;
+  return local;
+}
+
+ProgressComparison KOReaderSyncActivity::compareLocalToRemote() const {
+  return compareProgress(localReadingPosition(), localProgress.percentage, remotePosition, remoteProgress.percentage);
+}
+
+bool KOReaderSyncActivity::smartSyncEnabled() const {
+  return KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART;
+}
+
+bool KOReaderSyncActivity::probeAlternateDocumentId(const bool havePrimaryRecord, const bool preferForeignRecord,
+                                                    KOReaderSyncClient::Error* probeError) {
+  if (probeError != nullptr) *probeError = KOReaderSyncClient::OK;
+
+  const DocumentMatchMethod altMethod = effectiveMatchMethod == DocumentMatchMethod::FILENAME
+                                            ? DocumentMatchMethod::BINARY
+                                            : DocumentMatchMethod::FILENAME;
+  const std::string altHash = hashForMethod(altMethod);
+  if (altHash.empty() || altHash == documentHash) {
+    return false;
+  }
+
+  LOG_DBG("KOSync", "%s under the %s id; probing the %s id %s",
+          havePrimaryRecord ? "Checking for a further record" : "No record", matchMethodName(effectiveMatchMethod),
+          matchMethodName(altMethod), altHash.c_str());
+
+  KOReaderProgress altProgress;
+  const auto altResult = KOReaderSyncClient::getProgress(altHash, altProgress);
+  if (altResult != KOReaderSyncClient::OK) {
+    LOG_DBG("KOSync", "Alternate %s id has no record either (result=%d)", matchMethodName(altMethod), altResult);
+    if (probeError != nullptr && shouldAbortExplicitPullOnProbeError(preferForeignRecord,
+                                                                      altResult != KOReaderSyncClient::NOT_FOUND)) {
+      *probeError = altResult;
+    }
+    return false;
+  }
+
+  if (!havePrimaryRecord && preferForeignRecord && altProgress.deviceId == "crosspoint-reader") {
+    LOG_INF("KOSync", "Explicit pull ignores the alternate record because it was written by this firmware");
+    return false;
+  }
+
+  // An explicit Pull means "load the other reader's position". The account may
+  // contain two hashes for the same book: a filename hash used by KOReader and a
+  // binary hash previously written by this firmware. Comparing percentages and
+  // choosing the farther record can then pull our own stale upload back into the
+  // reader, moving it ahead of KOReader. Prefer a record that was not written by
+  // this firmware before using progress as a tie-breaker.
+  if (havePrimaryRecord && preferForeignRecord) {
+    constexpr char kOwnDeviceId[] = "crosspoint-reader";
+    const bool primaryIsOwn = remoteProgress.deviceId == kOwnDeviceId;
+    const bool alternateIsOwn = altProgress.deviceId == kOwnDeviceId;
+    const auto choice = selectRemoteRecordForPull(
+        primaryIsOwn, remoteProgress.timestamp,
+        ProgressMapper::peekRemote({remoteProgress.progress, remoteProgress.percentage}, spineCount),
+        remoteProgress.percentage, alternateIsOwn, altProgress.timestamp,
+        ProgressMapper::peekRemote({altProgress.progress, altProgress.percentage}, spineCount), altProgress.percentage);
+    if (choice == RemoteRecordChoice::Alternate) {
+      LOG_INF("KOSync", "Explicit pull prefers alternate %s record (device=%s)", matchMethodName(altMethod),
+              altProgress.device.c_str());
+      documentHash = altHash;
+      effectiveMatchMethod = altMethod;
+      remoteProgress = std::move(altProgress);
+      KOReaderDocumentId::saveLearnedMatchMethod(epubPath, altMethod);
+      return true;
+    }
+    LOG_INF("KOSync", "Explicit pull keeps primary %s record (device=%s)",
+            matchMethodName(effectiveMatchMethod), remoteProgress.device.c_str());
+    return false;
+  }
+
+  // Both ids hold a record, so this is not a missing-book question any more but a
+  // which-one-is-live question. Only move if the other device is genuinely further along;
+  // otherwise ours stands and we keep writing where we already were. Judged by spine and
+  // paragraph from the two XPaths before the two percentages, which are in different units.
+  if (havePrimaryRecord &&
+      selectRemoteRecord(ProgressMapper::peekRemote({remoteProgress.progress, remoteProgress.percentage}, spineCount),
+                         remoteProgress.percentage,
+                         ProgressMapper::peekRemote({altProgress.progress, altProgress.percentage}, spineCount),
+                         altProgress.percentage) == RemoteRecordChoice::Primary) {
+    LOG_DBG("KOSync", "Alternate %s id is not ahead (%.4f at %s vs %.4f at %s); keeping the %s id",
+            matchMethodName(altMethod), altProgress.percentage, altProgress.progress.c_str(), remoteProgress.percentage,
+            remoteProgress.progress.c_str(), matchMethodName(effectiveMatchMethod));
+    return false;
+  }
+
+  // Proof of which id the server holds this book under. Adopt it for this session and
+  // persist it, so subsequent syncs skip the probe entirely and — the point of the whole
+  // exercise — upload to the id the other device actually reads.
+  LOG_INF("KOSync", "Found remote progress under the %s id; adopting it for this book", matchMethodName(altMethod));
+  documentHash = altHash;
+  effectiveMatchMethod = altMethod;
+  remoteProgress = std::move(altProgress);
+  KOReaderDocumentId::saveLearnedMatchMethod(epubPath, altMethod);
+  return true;
+}
+
+bool KOReaderSyncActivity::handleAutoPushPreflight() {
+  KOReaderSyncClient::beginPersistentSession();
+  KOReaderProgress warmupProgress;
+  auto warmupResult = KOReaderSyncClient::getProgress(documentHash, warmupProgress);
+
+  // Same probe as the compare path. Without it, auto-push-on-close is the most likely way to
+  // create the divergence in the first place: it would silently write a second record under
+  // our id while the other device's progress sits under theirs.
+  if (warmupResult == KOReaderSyncClient::NOT_FOUND && probeAlternateDocumentId(false)) {
+    warmupProgress = remoteProgress;
+    warmupResult = KOReaderSyncClient::OK;
+  }
+
+  if (warmupResult != KOReaderSyncClient::OK && warmupResult != KOReaderSyncClient::NOT_FOUND) {
+    KOReaderSyncClient::endPersistentSession();
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = KOReaderSyncClient::errorString(warmupResult);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        statusMessage += " — ";
+        statusMessage += detail;
+      }
+    }
+    requestUpdate(true);
+    return false;
+  }
+  // Auto-push must not overwrite progress that is already further along on the server, and has
+  // nothing to add when the server already holds this page. Judged by spine and paragraph from
+  // the record's XPath before its percentage: a KOReader chapter-start push reads as a higher
+  // percentage than our byte count gives the next ten pages of that chapter.
+  // Our own last push is known to the byte (spine, page, content offset), so it compares at the
+  // offset tier. Any other record is judged from its XPath string as before: auto-push never
+  // inflates the chapter, so it never needs the radio down.
+  ProgressComparison againstServer = ProgressComparison::Unknown;
+  if (warmupResult == KOReaderSyncClient::OK) {
+    const auto own = ownLastPushPosition(warmupProgress.progress);
+    if (own) {
+      LOG_DBG("KOSync", "AUTO_PUSH: the server holds our last push; comparing from the cache");
+    }
+    againstServer = compareProgress(
+        localReadingPosition(), localProgress.percentage,
+        own ? *own : ProgressMapper::peekRemote({warmupProgress.progress, warmupProgress.percentage}, spineCount),
+        warmupProgress.percentage);
+  }
+  if (syncIntent == KOReaderSyncIntentState::AUTO_PUSH &&
+      (againstServer == ProgressComparison::RemoteAhead || againstServer == ProgressComparison::Synchronized)) {
+    LOG_DBG("KOSync", "AUTO_PUSH skipped: server is %s (remote %.4f at %s, local %.4f spine=%d page=%d)",
+            againstServer == ProgressComparison::RemoteAhead ? "ahead" : "at this page", warmupProgress.percentage,
+            warmupProgress.progress.c_str(), localProgress.percentage, currentSpineIndex, currentPage);
+    KOReaderSyncClient::endPersistentSession();
+    // Drop the radio while user reads the result; full teardown happens at silent reboot.
+    esp_wifi_stop();
+    APP_STATE.koReaderSyncSession.outcome = KOReaderSyncOutcomeState::UPLOAD_COMPLETE;
+    APP_STATE.saveToFile();
+    resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
+    return false;
+  }
+  return true;
+}
+
+void KOReaderSyncActivity::performFetchAndCompare() {
+  {
+    RenderLock lock(*this);
+    statusMessage = tr(STR_FETCH_PROGRESS);
+  }
+  requestUpdate();
+
+  // Keep the GET connection alive so Upload can reuse the same session and
+  // avoid a second TLS handshake under fragmented heap.
+  KOReaderSyncClient::beginPersistentSession();
+
+  // Fetch remote progress
+  auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+
+  // Nothing under our id may just mean the other device computed a different one. Costs one
+  // extra GET on the already-warm session, and only when the lookup came up empty.
+  const bool preferForeignRecord = syncIntent == KOReaderSyncIntentState::PULL_REMOTE ||
+                                   syncIntent == KOReaderSyncIntentState::AUTO_PULL;
+  KOReaderSyncClient::Error alternateProbeError = KOReaderSyncClient::OK;
+  if (result == KOReaderSyncClient::NOT_FOUND &&
+      probeAlternateDocumentId(false, preferForeignRecord, &alternateProbeError)) {
+    result = KOReaderSyncClient::OK;
+  } else if (result == KOReaderSyncClient::OK &&
+             (smartSyncEnabled() || syncIntent == KOReaderSyncIntentState::PULL_REMOTE ||
+              syncIntent == KOReaderSyncIntentState::AUTO_PULL)) {
+    // Smart mode also probes when our own id DID resolve. Otherwise a pairing that diverged
+    // before the learned-id work existed stays diverged forever: our record keeps answering,
+    // so the miss that would trigger a probe never happens. Costs one extra GET per smart
+    // sync, which is the price of not asking the user to reconcile it by hand.
+    probeAlternateDocumentId(true, preferForeignRecord, &alternateProbeError);
+  }
+
+  // A manual/automatic pull must not apply a possibly stale primary record when
+  // the second document-id lookup failed transiently. NOT_FOUND is different:
+  // it means there is no alternate record, so the valid primary remains usable.
+  if (shouldAbortExplicitPullOnProbeError(preferForeignRecord, alternateProbeError != KOReaderSyncClient::OK)) {
+    LOG_ERR("KOSync", "Explicit pull stopped because alternate document lookup failed (result=%d)",
+            alternateProbeError);
+    result = alternateProbeError;
+  }
+
+  if (result == KOReaderSyncClient::NOT_FOUND) {
+    if (syncIntent == KOReaderSyncIntentState::PULL_REMOTE) {
+      // Pull intent must not silently fall back to upload when server has no
+      // remote progress. Failing explicitly keeps action semantics predictable.
+      KOReaderSyncClient::endPersistentSession();
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_NO_REMOTE_MSG);
+      }
+      requestUpdate(true);
+      return;
+    }
+
+    if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
+      // Auto-pull at book open: nothing to apply, just open the book with local progress.
+      KOReaderSyncClient::endPersistentSession();
+      esp_wifi_stop();
+      resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+      return;
+    }
+
+    // Keep session open so an immediate upload can reuse the same connection.
+    {
+      RenderLock lock(*this);
+      state = NO_REMOTE_PROGRESS;
+      hasRemoteProgress = false;
+    }
+    askToUpload();
+    return;
+  }
+
+  if (result != KOReaderSyncClient::OK) {
+    KOReaderSyncClient::endPersistentSession();
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = KOReaderSyncClient::errorString(result);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        statusMessage += " — ";
+        statusMessage += detail;
+      }
+    }
+    requestUpdate(true);
+    return;
+  }
+
+  // Prepare remote mapping state for the next step.
+  hasRemoteProgress = false;
+  remotePositionMapped = false;
+  remotePosition = CrossPointPosition{};
+  remotePosition.spineIndex = -1;
+  remotePosition.pageNumber = -1;
+  remoteChapterLabel.clear();
+
+  if (syncIntent == KOReaderSyncIntentState::PULL_REMOTE || syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
+    // Pull intent applies immediately and exits. We bypass chooser UI to keep
+    // reader menu actions deterministic ("pull" always means apply remote).
+    // Nothing is sent after a pull (the reader reopens on the applied position), so the radio
+    // goes fully down before the mapping inflates the chapter.
+    dropRadioForRemoteMapping();
+    const bool mapped = ensureRemotePositionMapped(false);
+    logSyncMemSnapshot("after_remote_mapping");
+    if (!mapped) {
+      if (syncIntent == KOReaderSyncIntentState::AUTO_PULL) {
+        // Auto-pull was best-effort. Fail silently and just open the book.
+        resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+        return;
+      }
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_SYNC_FAILED_MSG);
+      }
+      requestUpdate(true);
+      return;
+    }
+
+    applyRemoteAndFinish();
+    return;
+  }
+
+  // Compare intent keeps the legacy chooser flow (apply vs upload), which is
+  // still useful for manual conflict decisions. The remote position is resolved now so the
+  // compare UI shows concrete chapter/page data, and reused if Apply is chosen.
+  //
+  // A record that is our own last push needs no mapping: its position comes from the cache and
+  // WiFi stays up for a PUT on the warm session. Any other record is mapped with the radio fully
+  // down: the mapping inflates the chapter (up to 32 KB window plus state) and parses it, which
+  // under WiFi left 10.8 to 13.0 KB free on the X3. An upload chosen afterwards reconnects first
+  // (uploadLocalProgress).
+  if (!useOwnLastPush()) {
+    dropRadioForRemoteMapping();
+    const bool mapped = ensureRemotePositionMapped(false);
+    logSyncMemSnapshot("after_remote_mapping");
+    if (!mapped) {
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_SYNC_FAILED_MSG);
+      }
+      requestUpdate(true);
+      return;
+    }
+  }
+
+  // Local progress was precomputed before network; keep using the cached value.
+  releaseEpubForMapping();
+
+  const ProgressComparison comparison = compareLocalToRemote();
+
+  if (smartSyncEnabled()) {
+    // Resolve it rather than asking. The chooser only ever had one sensible answer in these
+    // cases, and it was already preselected — this just stops making the user confirm it.
+    // Unknown (neither side has a usable percentage and the XPath settles nothing) is the one
+    // case with no sensible default, so it falls through to the chooser.
+    switch (comparison) {
+      case ProgressComparison::Synchronized:
+        LOG_DBG("KOSync", "Smart sync: the two sides agree, nothing to do");
+#if CROSSPOINT_KOREADER_AUTOSYNC
+        AUTOSYNC_STATE.markSynced(epubPath, currentSpineIndex, currentPage);
+#endif
+        {
+          RenderLock lock(*this);
+          state = SYNC_COMPLETE;
+          uploadCompleteTime = millis();
+        }
+        requestUpdate(true);
+        return;
+      case ProgressComparison::LocalAhead:
+        LOG_DBG("KOSync", "Smart sync: local is further, uploading");
+        uploadLocalProgress();
+        return;
+      case ProgressComparison::RemoteAhead:
+        LOG_DBG("KOSync", "Smart sync: remote is further, applying");
+        applyRemoteAndFinish();
+        return;
+      case ProgressComparison::Unknown:
+        LOG_DBG("KOSync", "Smart sync: cannot tell which side is further, asking");
+        break;
+    }
+  }
+
+  {
+    RenderLock lock(*this);
+    state = SHOWING_RESULT;
+    // Default to the option matching the furthest progress.
+    selectedOption = comparison == ProgressComparison::LocalAhead ? 1 /* Upload local */ : 0 /* Apply remote */;
+  }
+  requestUpdate(true);
+}
+
+void KOReaderSyncActivity::performSync() {
+  if (!calculateDocumentHash()) {
+    return;
+  }
+
+  // Local mapping is only needed for compare/upload paths.
+  // Pull-only modes can skip this expensive step and go straight to remote fetch.
+  if (syncIntent != KOReaderSyncIntentState::PULL_REMOTE && syncIntent != KOReaderSyncIntentState::AUTO_PULL) {
+    // Normally mapped in onEnter, before WiFi, and returned from the cache here. Only a mapping
+    // that failed there runs again now, still before the first network request so the inflate
+    // work happens before TLS.
+    if (!localProgressComputed) {
+      {
+        RenderLock lock(*this);
+        statusMessage = tr(STR_MAPPING_LOCAL);
+      }
+      requestUpdateAndWait();
+    }
+    if (!computeLocalProgressAndChapter()) {
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_SYNC_FAILED_MSG);
+      }
+      requestUpdate(true);
+      return;
+    }
+  }
+
+  // Drop EPUB state before HTTPS to maximize contiguous heap for TLS.
+  releaseEpubForMapping();
+
+  // PUSH_LOCAL is an explicit user upload — go straight to PUT.
+  // AUTO_PUSH needs the preflight GET to bail out if the remote is already ahead.
+  if (syncIntent == KOReaderSyncIntentState::PUSH_LOCAL) {
+    performUpload();
+    return;
+  }
+  if (syncIntent == KOReaderSyncIntentState::AUTO_PUSH) {
+    if (!handleAutoPushPreflight()) return;
+    performUpload();
+    return;
+  }
+
+  performFetchAndCompare();
+}
+
+void KOReaderSyncActivity::performUpload() {
+  {
+    RenderLock lock(*this);
+    state = UPLOADING;
+    statusMessage = tr(STR_UPLOAD_PROGRESS);
+  }
+  requestUpdateAndWait();
+
+  // If sync reached this screen without cached local progress, compute it now.
+  // This keeps upload robust when UI flow changes or retries happen.
+  if (localProgress.xpath.empty()) {
+    if (!computeLocalProgressAndChapter()) {
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_SYNC_FAILED_MSG);
+      }
+      requestUpdate(true);
+      return;
+    }
+    releaseEpubForMapping();
+  }
+
+  // Hard-stop if we still have no xpath: sending an empty progress payload would
+  // be ambiguous server-side and hides the real local mapping failure.
+  if (localProgress.xpath.empty()) {
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = tr(STR_SYNC_FAILED_MSG);
+    }
+    requestUpdate(true);
+    return;
+  }
+
+  // Sync UI rendering can repopulate glyph caches after the initial GET / compare
+  // phase, so trim again right before the upload request.
+  trimMemoryForNetworkSession(renderer, "KOSync");
+  logSyncMemSnapshot("after_trim_before_updateProgress");
+
+  // Capture upload-phase memory separately from fetch phase to diagnose failures
+  // that only appear on PUT due to allocator state changes.
+  logSyncMemSnapshot("before_updateProgress");
+
+  // Ensure a session exists for upload. In compare flow this comes from the
+  // earlier GET; in direct-push flow it comes from the warmup GET above.
+  // In both cases, reuse avoids a second full TLS handshake.
+  KOReaderSyncClient::beginPersistentSession();
+
+  KOReaderProgress progress;
+  progress.document = documentHash;
+  progress.progress = localProgress.xpath;
+  progress.percentage = localProgress.percentage;
+  progress.metadata = localDocumentMetadata;
+
+  const auto result = KOReaderSyncClient::updateProgress(progress);
+  KOReaderSyncClient::endPersistentSession();
+  logSyncMemSnapshot("after_updateProgress");
+
+  if (result != KOReaderSyncClient::OK) {
+    // Drop the radio while user reads the result; full teardown happens at silent reboot.
+    esp_wifi_stop();
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      // Combine the short category label with the rich diagnostic so users (and bug
+      // reports) can tell network/TLS/server/heap failures apart at a glance.
+      statusMessage = KOReaderSyncClient::errorString(result);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        statusMessage += " — ";
+        statusMessage += detail;
+      }
+    }
+    requestUpdate();
+    return;
+  }
+
+  saveOwnLastPush();
+
+  // Drop the radio while user reads the success screen; full teardown happens at silent reboot.
+  esp_wifi_stop();
+  APP_STATE.koReaderSyncSession.outcome = KOReaderSyncOutcomeState::UPLOAD_COMPLETE;
+  APP_STATE.saveToFile();
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  AUTOSYNC_STATE.markSynced(epubPath, currentSpineIndex, currentPage);
+#endif
+  if (syncIntent == KOReaderSyncIntentState::AUTO_PUSH) {
+    // Auto-push doesn't need user acknowledgement on success; resume immediately
+    // back to the calling activity (RecentBooks / FileBrowser via reader).
+    resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
+    return;
+  }
+  {
+    RenderLock lock(*this);
+    state = UPLOAD_COMPLETE;
+    uploadCompleteTime = millis();
+  }
+  requestUpdate(true);
+}
+
+void KOReaderSyncActivity::onEnter() {
+  Activity::onEnter();
+  logSyncMemSnapshot("onEnter_begin");
+  LOG_DBG("KOSync", "Standalone sync start: path=%s spine=%d page=%d/%d intent=%d", epubPath.c_str(), currentSpineIndex,
+          currentPage, totalPagesInSpine, static_cast<int>(syncIntent));
+
+  // Check for credentials first
+  if (!KOREADER_STORE.hasCredentials()) {
+    state = NO_CREDENTIALS;
+    requestUpdate();
+    return;
+  }
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderSyncWorker::isBusy()) {
+    {
+      RenderLock lock(*this);
+      state = SYNCING;
+      statusMessage = tr(STR_KO_BG_SYNC_WAIT);
+    }
+    requestUpdateAndWait();
+    constexpr unsigned long BACKGROUND_DRAIN_TIMEOUT_MS = 10000;
+    if (!KOReaderSyncWorker::drain(BACKGROUND_DRAIN_TIMEOUT_MS)) {
+      LOG_ERR("KOSync", "Background sync job still running; proceeding anyway");
+    }
+  }
+#endif
+
+  // Past this point every path uses WiFi.
+  wifiActivated = true;
+
+  // Free the ~52 KB secondary framebuffer before the radio comes up rather than after, which is
+  // what trimMemoryForNetworkSession's contract asks for and what the other network activities
+  // already do: association and the WPA supplicant are allocation-heavy well ahead of TLS.
+  // Doing it in onWifiSelectionComplete() alone left WiFi bring-up and NTP running against the
+  // buffer, and a finished-book sync reached them with 3.4 KB contiguous free.
+  //
+  // Deliberately below the NO_CREDENTIALS return above: that path goes back to the reader without
+  // a silent reboot, and the helper has no realloc pairing, so releasing there would leave the
+  // reader in single-buffer mode with nothing to restore it. Every path from here does reboot.
+  trimMemoryForNetworkSession(renderer, "KOSync");
+  logSyncMemSnapshot("after_trim_before_wifi");
+
+  // Map the local position now, before the radio comes up, for every intent that may push (all
+  // but the pulls). Streaming the chapter holds the inflate ring (up to 32 KB) and the SAX state
+  // at once; with the secondary framebuffer just released that is the roomiest the heap will be,
+  // where after WiFi bring-up a 174 KB chapter took Min Free to 10.9 KB (X3, 2026-10-06). The Epub is released straight
+  // after: it would be released before TLS anyway (it is reloaded on demand for the remote mapping), and freeing its ~8
+  // KB before WiFi init lets the stack's allocations use the space instead of growing around it. A failure here is
+  // retried by performSync after WiFi, as before.
+  if (syncIntent != KOReaderSyncIntentState::PULL_REMOTE && syncIntent != KOReaderSyncIntentState::AUTO_PULL) {
+    {
+      RenderLock lock(*this);
+      state = SYNCING;
+      statusMessage = tr(STR_MAPPING_LOCAL);
+    }
+    requestUpdateAndWait();
+    if (!computeLocalProgressAndChapter()) {
+      LOG_ERR("KOSync", "Local mapping before WiFi failed; retrying after connect");
+    }
+    releaseEpubForMapping();
+    logSyncMemSnapshot("after_local_mapping");
+    {
+      RenderLock lock(*this);
+      state = WIFI_SELECTION;
+    }
+  }
+
+  // Check if already connected (e.g. from settings page auth)
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_DBG("KOSync", "Already connected to WiFi");
+    onWifiSelectionComplete(true);
+    return;
+  }
+
+  // Launch WiFi selection subactivity
+  LOG_DBG("KOSync", "Launching WifiSelectionActivity...");
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+}
+
+void KOReaderSyncActivity::onExit() {
+  Activity::onExit();
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (state == SYNC_FAILED) {
+    AUTOSYNC_STATE.markSyncFailed();
+  }
+#endif
+
+  logSyncMemSnapshot("onExit_before_cleanup");
+  KOReaderSyncClient::endPersistentSession();
+  releaseEpubForMapping();
+  logSyncMemSnapshot("onExit_after_cleanup");
+
+  if (wifiActivated) {
+    WiFi.disconnect(false);
+    delay(30);
+    // The reboot stays, and it is now a measured decision rather than an inherited one.
+    //
+    // The old rationale -- "a WiFi session fragments the heap past rebuilding the reader in
+    // place" -- turned out to be wrong on wolfSSL: contig runs 61428 -> 61428 -> 61428 across a
+    // push, and only ~6 KB is lost across a pull. Rebuilding in place genuinely works, and is
+    // faster (792 ms to first page against 2023 ms via the reboot).
+    //
+    // What kills it is a different number. A full esp_wifi_stop + deinit still ends
+    // ~20.5 KB below the pre-WiFi free-heap baseline, measured at -20560 / -20588 / -20644 across
+    // three sessions -- consistent enough to look like a one-time netif/event-loop cost rather
+    // than a per-session leak, but never proven so, and 20 KB is a large permanent narrowing on a
+    // 380 KB device. Reclaiming the framebuffer late also leaves contig at 25588 against 65524
+    // on a clean boot, which is below what an image decode needs.
+    //
+    // So: the reboot is not paying for fragmentation during the session, it is paying for a heap
+    // that never fully comes back. Until that ~20 KB is identified, rebooting is the cheaper
+    // trade. Do not remove this on the strength of the contig numbers alone.
+    switch (postAction_) {
+      case KOReaderSyncPostAction::Home:
+      case KOReaderSyncPostAction::OpdsSearch:
+        // OpdsSearch is resolved post-reboot by HomeActivity (see its onEnter()); the reboot
+        // itself just needs to land on Home like a plain post-sync Home would.
+        silentRestart();
+        break;
+      case KOReaderSyncPostAction::OpenBook:
+        // Repoint the "book to reopen on boot" record at the next book instead of the one that
+        // was just synced, then reuse the ordinary reader restart target.
+        if (!postActionTarget_.empty()) {
+          APP_STATE.openEpubPath = postActionTarget_;
+          APP_STATE.saveToFile();
+        }
+        silentRestartToReader();
+        break;
+      case KOReaderSyncPostAction::Reader:
+      default:
+        silentRestartToReader();
+        break;
+    }
+  }
+}
+
+void KOReaderSyncActivity::closeCancelled() {
+  if (closeRequested) {
+    return;
+  }
+
+  resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+}
+
+void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, const SyncResult* appliedResult) {
+  if (closeRequested) {
+    return;
+  }
+
+  closeRequested = true;
+  auto& sync = APP_STATE.koReaderSyncSession;
+  sync.outcome = outcome;
+  if (appliedResult) {
+    sync.resultSpineIndex = appliedResult->spineIndex;
+    sync.resultPage = appliedResult->page;
+    sync.resultParagraphIndex = appliedResult->paragraphIndex;
+    sync.resultHasParagraphIndex = appliedResult->hasParagraphIndex;
+    sync.resultListItemIndex = appliedResult->listItemIndex;
+    sync.resultHasListItemIndex = appliedResult->hasListItemIndex;
+    sync.resultVisibleOffset = appliedResult->visibleOffset;
+    sync.resultHasVisibleOffset = appliedResult->hasVisibleOffset;
+  } else if (outcome != KOReaderSyncOutcomeState::APPLIED_REMOTE) {
+    // Only zero the result fields when not resuming an already-applied remote
+    // position. The PULL_REMOTE path pre-saves the mapped result into APP_STATE
+    // before entering APPLY_COMPLETE; zeroing here would overwrite it.
+    sync.clearResult();
+  }
+  // Capture the destination before touching the session, since onExit() still needs it after the
+  // reboot decision. What may be cleared here depends entirely on who consumes the session next:
+  //
+  //  - Reader: the reopened reader is the consumer. applyPendingSyncSession() reads active,
+  //    epubPath and the result fields to move the user to the position Apply just resolved.
+  //    Clearing here throws that away and the book reopens exactly where it was, which looks
+  //    from the outside like Apply silently doing nothing.
+  //  - OpdsSearch: HomeActivity consumes postActionTarget after the reboot, so only `active`
+  //    is dropped and the rest is left in place for it.
+  //  - Home / OpenBook: nobody applies a result (Home has no reader; OpenBook opens a
+  //    different book, whose reader would reject this session on the epubPath check and leave
+  //    it lying around active). Clear it.
+  postAction_ = sync.postAction;
+  postActionTarget_ = sync.postActionTarget;
+  switch (postAction_) {
+    case KOReaderSyncPostAction::Reader:
+      break;
+    case KOReaderSyncPostAction::OpdsSearch:
+      sync.active = false;
+      break;
+    case KOReaderSyncPostAction::Home:
+    case KOReaderSyncPostAction::OpenBook:
+    default:
+      sync.clear();
+      break;
+  }
+  APP_STATE.saveToFile();
+  logSyncMemSnapshot("before_resume_reader");
+  switch (postAction_) {
+    case KOReaderSyncPostAction::Home:
+    case KOReaderSyncPostAction::OpdsSearch:
+      activityManager.goHome();
+      return;
+    case KOReaderSyncPostAction::OpenBook:
+      activityManager.goToReader(postActionTarget_.empty() ? epubPath : postActionTarget_);
+      return;
+    case KOReaderSyncPostAction::Reader:
+    default:
+      activityManager.goToReader(epubPath);
+      return;
+  }
+}
+
+void KOReaderSyncActivity::render(RenderLock&&) {
+  // Nothing of our own while asking: the question is the ConfirmationActivity above.
+  if (state == NO_REMOTE_PROGRESS) return;
+
+  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+
+  renderer.clearScreen();
+  renderer.drawCenteredText(UI_12_FONT_ID, 15 + contentRect.y, tr(STR_KOREADER_SYNC), true, EpdFontFamily::BOLD);
+
+  if (state == NO_CREDENTIALS) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_NO_CREDENTIALS_MSG), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, 320, tr(STR_KOREADER_SETUP_HINT));
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == SYNCING || state == UPLOADING) {
+    // Title frame already composed into the write buffer above (clearScreen); overlay the popup on
+    // it. drawPopup ships the frame itself — a second displayBuffer() here would ship the stale
+    // post-swap buffer.
+    GUI.drawPopup(renderer, statusMessage.c_str(), /*overlayDisplayedFrame=*/false);
+    return;
+  }
+
+  if (state == SHOWING_RESULT) {
+    // Show comparison
+    renderer.drawCenteredText(UI_10_FONT_ID, 120, tr(STR_PROGRESS_FOUND), true, EpdFontFamily::BOLD);
+
+    // Get chapter names from TOC
+    const std::string& remoteChapter = remoteChapterLabel;
+    const std::string& localChapter = localChapterLabel;
+
+    // Remote progress - chapter and page
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 160, tr(STR_REMOTE_LABEL), true);
+    char remoteChapterStr[128];
+    snprintf(remoteChapterStr, sizeof(remoteChapterStr), "  %s", remoteChapter.c_str());
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 185, remoteChapterStr);
+    char remotePageStr[64];
+    snprintf(remotePageStr, sizeof(remotePageStr), tr(STR_PAGE_OVERALL_FORMAT), remotePosition.pageNumber + 1,
+             remoteProgress.percentage * 100);
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 210, remotePageStr);
+
+    if (!remoteProgress.device.empty()) {
+      char deviceStr[64];
+      snprintf(deviceStr, sizeof(deviceStr), tr(STR_DEVICE_FROM_FORMAT), remoteProgress.device.c_str());
+      renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 235, deviceStr);
+    }
+
+    // Local progress - chapter and page
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 270, tr(STR_LOCAL_LABEL), true);
+    char localChapterStr[128];
+    snprintf(localChapterStr, sizeof(localChapterStr), "  %s", localChapter.c_str());
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 295, localChapterStr);
+    char localPageStr[64];
+    snprintf(localPageStr, sizeof(localPageStr), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), currentPage + 1, totalPagesInSpine,
+             localProgress.percentage * 100);
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 320, localPageStr);
+
+    const int optionY = 350;
+    const int optionHeight = 30;
+
+    // The three options published for touch. Only this state draws them -- every other state of
+    // this screen is a progress or result message with nothing to choose -- and the recorders are
+    // cleared at the top of each render pass, so a tap can never reach them from those.
+    ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, optionY - 2, optionHeight,
+                                     /*firstIndex=*/0, OPTION_COUNT);
+
+    // Apply option
+    if (selectedOption == 0) {
+      renderer.fillRect(contentRect.x, optionY - 2, contentRect.width - 1, optionHeight);
+    }
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY, tr(STR_APPLY_REMOTE), selectedOption != 0);
+
+    // Upload option
+    if (selectedOption == 1) {
+      renderer.fillRect(contentRect.x, optionY + optionHeight - 2, contentRect.width - 1, optionHeight);
+    }
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + optionHeight, tr(STR_UPLOAD_LOCAL),
+                      selectedOption != 1);
+
+    // Conflict policy. Offered here because this screen is the only place the choice is ever
+    // felt: a user who has just been asked is the one best placed to say "stop asking".
+    if (selectedOption == OPTION_SYNC_BEHAVIOR) {
+      renderer.fillRect(contentRect.x, optionY + 2 * optionHeight - 2, contentRect.width - 1, optionHeight);
+    }
+    char behaviorStr[96];
+    snprintf(behaviorStr, sizeof(behaviorStr), "%s: %s", tr(STR_KO_SYNC_CONFLICT),
+             smartSyncEnabled() ? tr(STR_KO_SMART_SYNC) : tr(STR_KO_ASK_EVERY_TIME));
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + 2 * optionHeight, behaviorStr,
+                      selectedOption != OPTION_SYNC_BEHAVIOR);
+
+    // Bottom button hints
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == UPLOAD_COMPLETE) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_UPLOAD_SUCCESS), true, EpdFontFamily::BOLD);
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == APPLY_COMPLETE) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_PULL_SUCCESS), true, EpdFontFamily::BOLD);
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == SYNC_COMPLETE) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_ALREADY_IN_SYNC), true, EpdFontFamily::BOLD);
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == SYNC_FAILED) {
+    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_SYNC_FAILED_MSG), true, EpdFontFamily::BOLD);
+
+    // Word-wrap the detail message so long TLS/network diagnostics aren't clipped.
+    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const auto lines = renderer.wrappedText(UI_10_FONT_ID, statusMessage.c_str(), contentRect.width - 20, 4);
+    int y = 320;
+    for (const auto& line : lines) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+      y += lineHeight;
+    }
+
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+}
+
+bool KOReaderSyncActivity::ensureEpubLoadedForMapping() {
+  if (epub) {
+    return true;
+  }
+
+  // Reload on demand to keep steady-state sync memory low. Mapping and chapter
+  // lookup need EPUB metadata; TLS steps do not.
+  epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+  if (!epub->load(true, true)) {
+    LOG_ERR("KOSync", "Failed to reload EPUB for mapping: %s", epubPath.c_str());
+    epub.reset();
+    return false;
+  }
+  epub->setupCacheDir();
+  spineCount = epub->getSpineItemsCount();
+  bookCachePath = epub->getCachePath();
+  return true;
+}
+
+bool KOReaderSyncActivity::ensureRemotePositionMapped(const bool closeSessionBeforeMapping) {
+  if (remotePositionMapped) {
+    return true;
+  }
+
+  // Mapping remote->local triggers EPUB inflate work, which needs a 32 KB
+  // contiguous block for the deflate ring buffer. The held-open wolfSSL TLS
+  // session otherwise pins contiguous heap, causing the inflate alloc to fail
+  // and the reverse XPath mapper to silently degrade to lossy percentage-only
+  // mapping. Tearing the session down here
+  // costs a fresh handshake if Upload runs afterwards, but Apply (the common
+  // outcome) wins both heap headroom and round-trip accuracy.
+  if (closeSessionBeforeMapping) {
+    KOReaderSyncClient::endPersistentSession();
+  }
+
+  {
+    RenderLock lock(*this);
+    statusMessage = tr(STR_MAPPING_REMOTE);
+  }
+  requestUpdateAndWait();
+
+  KOReaderPosition koPos = {remoteProgress.progress, remoteProgress.percentage};
+  if (!ensureEpubLoadedForMapping()) {
+    return false;
+  }
+  remotePosition = ProgressMapper::toCrossPoint(epub, koPos, currentSpineIndex, totalPagesInSpine);
+  computeRemoteChapter();
+  releaseEpubForMapping();
+  hasRemoteProgress = true;
+  remotePositionMapped = true;
+  return true;
+}
+
+void KOReaderSyncActivity::releaseEpubForMapping() { epub.reset(); }
+
+void KOReaderSyncActivity::dropRadioForRemoteMapping() {
+  if (radioDroppedForMapping) {
+    return;
+  }
+  // The same full teardown the settings' network screens use: SNTP off, disconnect, WIFI_OFF
+  // (esp_wifi_stop + deinit + netif). No NTP here: the clock was settled before the GET.
+  // wifiActivated stays set, so onExit still reboots as after any network session.
+  KOReaderSyncClient::endPersistentSession();
+  HalClock::wifiOff(/*skipNtpSync=*/true);
+  radioDroppedForMapping = true;
+  logSyncMemSnapshot("after_wifi_down_before_remote_mapping");
+}
+
+std::optional<CrossPointPosition> KOReaderSyncActivity::ownLastPushPosition(const std::string& remoteXPath) const {
+  if (bookCachePath.empty() || documentHash.empty()) {
+    return std::nullopt;
+  }
+  const std::string path = bookCachePath + LAST_PUSH_FILE;
+  if (!Storage.exists(path.c_str())) {
+    return std::nullopt;
+  }
+  const std::unique_ptr<LastPushBytes> buffer(new (std::nothrow) LastPushBytes);
+  if (!buffer) {
+    return std::nullopt;
+  }
+  FsFile f;
+  if (!Storage.openFileForRead("KOSync", path, f)) {
+    return std::nullopt;
+  }
+  const int size = f.read(buffer->bytes, sizeof(buffer->bytes));
+  f.close();
+  const auto last = LastPush::decode(buffer->bytes, size > 0 ? static_cast<size_t>(size) : 0);
+  // Only a push from a page with a content offset is cached, but a record without one would
+  // still not be a position known to the byte: map it like any other.
+  if (!last || !last->hasVisibleOffset || !remoteIsOurLastPush(*last, documentHash.c_str(), remoteXPath.c_str())) {
+    return std::nullopt;
+  }
+  return last->position();
+}
+
+bool KOReaderSyncActivity::useOwnLastPush() {
+  const auto own = ownLastPushPosition(remoteProgress.progress);
+  if (!own) {
+    return false;
+  }
+  remotePosition = *own;
+  // The chapter label: ours when the push came from the chapter we are in (the usual case), else
+  // the TOC, which needs the Epub's metadata but no chapter inflate.
+  if (remotePosition.spineIndex == currentSpineIndex) {
+    remoteChapterLabel = localChapterLabel;
+  } else if (ensureEpubLoadedForMapping()) {
+    computeRemoteChapter();
+    releaseEpubForMapping();
+  }
+  hasRemoteProgress = true;
+  remotePositionMapped = true;
+  LOG_INF("KOSync", "Remote record is our last push (spine=%d page=%d off=%lu); no mapping needed",
+          remotePosition.spineIndex, remotePosition.pageNumber,
+          static_cast<unsigned long>(remotePosition.visibleTextOffset));
+  return true;
+}
+
+void KOReaderSyncActivity::saveOwnLastPush() const {
+  if (bookCachePath.empty()) {
+    return;
+  }
+  const std::string path = bookCachePath + LAST_PUSH_FILE;
+  // Cached only with the page's content offset: that is what makes the record a position known
+  // to the byte. A push without one (or with an XPath too long for the slot) removes an older
+  // record, so the file is always our last push or nothing.
+  const auto push = hasLocalVisibleOffset
+                        ? LastPush::make(documentHash.c_str(), localProgress.xpath.c_str(), currentSpineIndex,
+                                         currentPage, localVisibleOffsetAtPage, true)
+                        : std::nullopt;
+  if (!push) {
+    if (Storage.exists(path.c_str())) {
+      Storage.remove(path.c_str());
+    }
+    return;
+  }
+  const std::unique_ptr<LastPushBytes> buffer(new (std::nothrow) LastPushBytes);
+  if (!buffer) {
+    return;
+  }
+  const size_t size = push->encode(buffer->bytes);
+  FsFile f;
+  if (!Storage.openFileForWrite("KOSync", path, f)) {
+    LOG_ERR("KOSync", "Could not write the last-push cache: %s", path.c_str());
+    return;
+  }
+  f.write(buffer->bytes, size);
+  f.close();
+}
+
+// The server has nothing for this book: offer to put our position there. The session is still
+// open, so an upload reuses the same connection.
+void KOReaderSyncActivity::askToUpload() {
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_NO_REMOTE_MSG);
+  question.message = tr(STR_UPLOAD_PROMPT);
+  question.acceptLabel = StrId::STR_UPLOAD;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             closeCancelled();
+                             return;
+                           }
+                           if (documentHash.empty()) {
+                             // Must go through the effective method, not the configured one: a book
+                             // the server holds under the other device's id has to keep uploading
+                             // there.
+                             documentHash = hashForMethod(effectiveMatchMethod);
+                           }
+                           uploadLocalProgress();
+                         });
+}
+
+void KOReaderSyncActivity::uploadLocalProgress() {
+  if (!radioDroppedForMapping) {
+    performUpload();
+    return;
+  }
+  // The radio went down for the remote mapping; the PUT needs it back. The same path as the first
+  // connect: WifiSelectionActivity auto-connects to the saved network. The local position was
+  // mapped before the first connect and is reused (localProgressComputed).
+  LOG_DBG("KOSync", "Reconnecting WiFi for the upload");
+  {
+    RenderLock lock(*this);
+    state = CONNECTING;
+  }
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onReconnectForUpload(!result.isCancelled); });
+}
+
+void KOReaderSyncActivity::onReconnectForUpload(const bool success) {
+  if (!success) {
+    // Never a silent no-op: the user asked for an upload, and the local progress is untouched.
+    LOG_ERR("KOSync", "Reconnect for the upload failed or was cancelled; nothing uploaded");
+    {
+      RenderLock lock(*this);
+      state = SYNC_FAILED;
+      statusMessage = tr(STR_WIFI_CONN_FAILED);
+    }
+    requestUpdate(true);
+    return;
+  }
+  radioDroppedForMapping = false;
+  WiFi.setSleep(false);
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
+  logSyncMemSnapshot("after_reconnect_for_upload");
+  performUpload();
+}
+
+bool KOReaderSyncActivity::computeLocalProgressAndChapter() {
+  if (localProgressComputed) {
+    return true;  // mapped in onEnter, before WiFi
+  }
+  if (!ensureEpubLoadedForMapping()) {
+    localProgress = KOReaderPosition{};
+    localChapterLabel.clear();
+    localProgressComputed = false;
+    return false;
+  }
+
+  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPagesInSpine, localParagraphIndex,
+                                 hasLocalParagraphIndex};
+  localPos.visibleTextOffset = localVisibleOffsetAtPage;
+  localPos.hasVisibleTextOffset = hasLocalVisibleOffset;
+  localProgress = ProgressMapper::toKOReader(epub, localPos);
+  LOG_INF("KOSync", "Local sync position: spine=%d page=%d/%d hasOffset=%d offset=%lu -> %.2f%% at %s",
+          currentSpineIndex, currentPage, totalPagesInSpine, localPos.hasVisibleTextOffset ? 1 : 0,
+          static_cast<unsigned long>(localPos.visibleTextOffset), localProgress.percentage * 100.0f,
+          localProgress.xpath.c_str());
+
+  const int localTocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
+  localChapterLabel = (localTocIndex >= 0)
+                          ? epub->getTocItem(localTocIndex).title
+                          : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(currentSpineIndex + 1));
+
+  if (KOREADER_STORE.getSendMetadata()) {
+    localDocumentMetadata = KOReaderSyncMetadata::forBook(epubPath, epub->getTitle(), epub->getAuthor());
+  } else {
+    localDocumentMetadata.reset();
+  }
+
+  localProgressComputed = true;
+  return true;
+}
+
+void KOReaderSyncActivity::computeRemoteChapter() {
+  if (!epub) {
+    return;
+  }
+  const int remoteTocIndex = epub->getTocIndexForSpineIndex(remotePosition.spineIndex);
+  remoteChapterLabel = (remoteTocIndex >= 0)
+                           ? epub->getTocItem(remoteTocIndex).title
+                           : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(remotePosition.spineIndex + 1));
+}
+
+void KOReaderSyncActivity::loop() {
+  if (state == NO_CREDENTIALS || state == SYNC_FAILED || state == UPLOAD_COMPLETE || state == APPLY_COMPLETE ||
+      state == SYNC_COMPLETE) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      if (state == APPLY_COMPLETE) {
+        resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
+      } else if (state == UPLOAD_COMPLETE) {
+        resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
+      } else if (state == SYNC_FAILED || state == NO_CREDENTIALS) {
+        resumeReader(KOReaderSyncOutcomeState::FAILED);
+      } else {
+        resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+      }
+      return;
+    }
+
+    if ((state == UPLOAD_COMPLETE || state == APPLY_COMPLETE || state == SYNC_COMPLETE) &&
+        millis() - uploadCompleteTime >= 3000) {
+      if (state == SYNC_COMPLETE) {
+        // Nothing moved on either side, so there is no outcome to report to the reader.
+        resumeReader(KOReaderSyncOutcomeState::CANCELLED);
+      } else if (state == APPLY_COMPLETE) {
+        resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE);
+      } else {
+        resumeReader(KOReaderSyncOutcomeState::UPLOAD_COMPLETE);
+      }
+    }
+    return;
+  }
+
+  if (state == SHOWING_RESULT) {
+    // Navigate options. Up and Down previously both advanced, which was invisible with two rows
+    // and wrong as soon as a third existed.
+    if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Up) ||
+        mappedInput.wasLogicalReleased(MappedInputManager::Direction::Left)) {
+      selectedOption = (selectedOption + OPTION_COUNT - 1) % OPTION_COUNT;
+      requestUpdate();
+    } else if (mappedInput.wasLogicalReleased(MappedInputManager::Direction::Down) ||
+               mappedInput.wasLogicalReleased(MappedInputManager::Direction::Right)) {
+      selectedOption = (selectedOption + 1) % OPTION_COUNT;
+      requestUpdate();
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (selectedOption == OPTION_SYNC_BEHAVIOR) {
+        const bool nowSmart = !smartSyncEnabled();
+        KOREADER_STORE.setSyncBehavior(nowSmart ? KOReaderSyncBehavior::SMART : KOReaderSyncBehavior::ASK_EVERY_TIME);
+        KOREADER_STORE.saveToFile();
+        // Leave the cursor on an actionable row rather than the toggle, and put it on the row
+        // the new policy would have chosen — which both avoids a second Confirm toggling straight
+        // back and shows what "use furthest" actually resolves to for this book.
+        {
+          RenderLock lock(*this);
+          selectedOption = compareLocalToRemote() == ProgressComparison::LocalAhead ? 1 : 0;
+        }
+        requestUpdate();
+        return;
+      }
+      if (selectedOption == 0) {
+        if (!ensureRemotePositionMapped()) {
+          {
+            RenderLock lock(*this);
+            state = SYNC_FAILED;
+            statusMessage = tr(STR_SYNC_FAILED_MSG);
+          }
+          requestUpdate(true);
+          return;
+        }
+        // Wifi will be turned off in onExit()
+        const SyncResult result = {remotePosition.spineIndex,        remotePosition.pageNumber,
+                                   remotePosition.paragraphIndex,    remotePosition.hasParagraphIndex,
+                                   remotePosition.listItemIndex,     remotePosition.hasListItemIndex,
+                                   remotePosition.visibleTextOffset, remotePosition.hasVisibleTextOffset};
+        resumeReader(KOReaderSyncOutcomeState::APPLIED_REMOTE, &result);
+      } else if (selectedOption == 1) {
+        // Upload local progress
+        uploadLocalProgress();
+      }
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      closeCancelled();
+    }
+    return;
+  }
+}
+
+ListRowTap::Result KOReaderSyncActivity::selectListRow(const int index) {
+  // Guarded on the state that actually draws the options: `state` is read on the loop task and
+  // could have moved on since the render that recorded the band.
+  if (state != SHOWING_RESULT) return ListRowTap::Result::Rejected;
+  return ListRowTap::apply(index, OPTION_COUNT, selectedOption);
+}
