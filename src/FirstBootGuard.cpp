@@ -5,10 +5,13 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
+#include <esp_attr.h>
+#include <esp_private/esp_clk.h>
 #include <nvs.h>
 #include <mbedtls/sha256.h>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include "network/OtaBootSwitch.h"
 
@@ -16,14 +19,54 @@ namespace FirstBootGuard {
 #if FREEINK_DEVICE_X4PRO
 namespace {
 constexpr uint32_t MAGIC = 0x31474246;
+constexpr uint32_t RESET_WINDOW_MAGIC = 0x58475231;
+constexpr uint64_t RESET_WINDOW_US = 180ULL * 1000000ULL;
 struct Record { uint32_t magic; uint32_t fallback; uint8_t accepted[32]; uint8_t trial[32]; uint32_t pending; };
+struct ResetWindowStamp { uint32_t magic; uint64_t startedAtUs; uint32_t checksum; };
+RTC_NOINIT_ATTR ResetWindowStamp resetWindowStamp;
 Record record{};
 nvs_handle_t prefs = 0;
 const esp_partition_t* previous = nullptr;
-bool probation = false;
+std::atomic<bool> probation{false};
 BootTrialHealth health;
 esp_timer_handle_t timer = nullptr;
 uint8_t runningHash[32]{};
+uint32_t resetWindowChecksum(uint64_t startedAtUs) {
+  return RESET_WINDOW_MAGIC ^ static_cast<uint32_t>(startedAtUs) ^
+         static_cast<uint32_t>(startedAtUs >> 32) ^ 0xA53C91E7;
+}
+bool resetWindowStampValid() {
+  return resetWindowStamp.magic == RESET_WINDOW_MAGIC &&
+         resetWindowStamp.checksum == resetWindowChecksum(resetWindowStamp.startedAtUs);
+}
+void startResetWindow() {
+  resetWindowStamp.magic = 0;
+  resetWindowStamp.startedAtUs = esp_clk_rtc_time();
+  resetWindowStamp.checksum = resetWindowChecksum(resetWindowStamp.startedAtUs);
+  resetWindowStamp.magic = RESET_WINDOW_MAGIC;
+}
+bool resetWindowExpired() {
+  if (!resetWindowStampValid()) return false;
+  const uint64_t now = esp_clk_rtc_time();
+  return now >= resetWindowStamp.startedAtUs && now - resetWindowStamp.startedAtUs >= RESET_WINDOW_US;
+}
+void clearResetGrace() {
+  if (prefs) {
+    nvs_erase_key(prefs, "reset_grace");
+    nvs_commit(prefs);
+  }
+}
+bool resetGraceRequiresRollback() {
+  uint8_t enabled = 0;
+  if (!prefs || nvs_get_u8(prefs, "reset_grace", &enabled) != ESP_OK || !enabled) return false;
+  if (resetWindowExpired()) {
+    clearResetGrace();
+    return false;
+  }
+  // Deep-sleep wake is the normal power-button path on X4 Pro. Any other
+  // restart during the grace window is treated as a failed run.
+  return esp_reset_reason() != ESP_RST_DEEPSLEEP;
+}
 // Verify the actual bytes, not only an app descriptor. The firmware's patched
 // image header is rejected by esp_image_verify on some OEM bootloaders.
 bool verify(const esp_partition_t* p, uint8_t digest[32]) {
@@ -106,10 +149,17 @@ const esp_partition_t* priorSlot(const esp_partition_t* running) {
   return nullptr;
 }
 void deadline(void*) {
-  // Complete an unattended trial explicitly. OEM rollback alone may reuse the
-  // same OTA sequence when the older firmware installs this image again.
+  if (!probation) return;
+  if (health.healthyAtDeadline(millis())) {
+    if (accept()) {
+      LOG_INF("BOOT", "Trial accepted after 30 seconds without a startup failure");
+      return;
+    }
+    LOG_ERR("BOOT", "Trial could not be committed; attempting to restore the previous image");
+  } else {
+    LOG_ERR("BOOT", "Trial failed: startup did not remain healthy for the 30-second check");
+  }
   rollback();
-  esp_restart(); // if switching failed, retain the pending marker for recovery
 }
 }
 void begin() {
@@ -124,12 +174,25 @@ void begin() {
   }
   if(std::memcmp(record.accepted,runningHash,32)==0) {
     if(record.pending) {record.pending=0;if(!save()) {rollback();esp_restart();return;}}
+    if (resetGraceRequiresRollback()) {
+      previous=at(record.fallback);
+      if (previous) {
+        LOG_ERR("BOOT", "Non-sleep reset during the 180-second post-install window; reverting to the previous image");
+        rollback();
+        return;
+      }
+      LOG_ERR("BOOT", "Reset during the grace window, but no valid previous image is available");
+    }
     esp_ota_img_states_t state;
     if(esp_ota_get_state_partition(running,&state)==ESP_OK && state==ESP_OTA_IMG_PENDING_VERIFY)
       esp_ota_mark_app_valid_cancel_rollback();
     return;
   }
   probation=true;
+  health.reset(millis());
+  startResetWindow();
+  // A different image starts a new recovery window.
+  clearResetGrace();
   uint8_t check[32];
   const uint32_t sequence=runningSequence(running);
   uint32_t priorSequence=0;
@@ -157,22 +220,30 @@ void begin() {
     rollback();esp_restart();return;
   }
   esp_timer_create_args_t args{};args.callback=deadline;args.name="trial_deadline";
-  if(esp_timer_create(&args,&timer)!=ESP_OK || esp_timer_start_once(timer,180ULL*1000000)!=ESP_OK) {
+  if(esp_timer_create(&args,&timer)!=ESP_OK ||
+     esp_timer_start_once(timer,static_cast<uint64_t>(BootTrialHealth::kHealthyWindowMs)*1000ULL)!=ESP_OK) {
     rollback();esp_restart();
   }
 }
 void observeHealthyLoop(unsigned long now, bool ready) {
-  if(probation && health.observe(static_cast<uint32_t>(now),ready) && accept())
-    LOG_INF("BOOT", "Trial automatically accepted after 30 s of responsive UI");
+  if(probation.load(std::memory_order_acquire)) health.observe(static_cast<uint32_t>(now),ready);
 }
-bool active(){return probation;}
+bool active(){return probation.load(std::memory_order_acquire);}
 bool hasFallback(){return previous!=nullptr;}
 void rollback() {
   uint8_t digest[32];
   const auto running=esp_ota_get_running_partition();
   if(!previous || previous->address==running->address || !verify(previous,digest)) return;
-  // Leave pending persisted until the switch succeeds. A power interruption
-  // retries the same recovery; the previous app itself is never rewritten.
+  // Persist recovery intent before switching. This also handles rollback after
+  // the trial was accepted: if power/reset interrupts the switch, either the
+  // old app boots as accepted or the trial image retries the same rollback.
+  record.fallback=previous->address;
+  std::memcpy(record.accepted,digest,32);
+  std::memcpy(record.trial,runningHash,32);
+  record.pending=1;
+  if (prefs) nvs_erase_key(prefs,"reset_grace");
+  if (!save()) return;
+  // The previous app itself is never rewritten.
   // A known-good fallback is not a new installation. Marking it NEW makes
   // the OEM bootloader demand another acceptance from older firmware and
   // can abort that recovery image on the next reset.
@@ -190,10 +261,12 @@ bool accept() {
   esp_ota_img_states_t state;
   if(esp_ota_get_state_partition(esp_ota_get_running_partition(),&state)!=ESP_OK) return false;
   if(state!=ESP_OTA_IMG_VALID && esp_ota_mark_app_valid_cancel_rollback()!=ESP_OK) return false;
+  if (!resetWindowStampValid()) startResetWindow();
+  if (nvs_set_u8(prefs,"reset_grace",1)!=ESP_OK || nvs_commit(prefs)!=ESP_OK) return false;
   Record old=record;
   std::memcpy(record.accepted,runningHash,32);record.pending=0;
-  if(!save()) {record=old;return false;}
-  if(timer) esp_timer_stop(timer);
+  if(!save()) {record=old;clearResetGrace();return false;}
+  if(timer && esp_timer_is_active(timer)) esp_timer_stop(timer);
   probation=false;
   return true;
 }

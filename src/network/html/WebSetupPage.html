@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8" />
@@ -10,108 +10,86 @@
        book uploads working while it is missing. -->
   <style>
     :root {
-      --font-color: #333;
-      --bg: #f5f5f5;
-      --card-bg: #fff;
-      --accent-color: #5a8c73;
-      --subtitle-color: #7f8c8d;
+      color-scheme: light dark;
+      --ink: #20251f; --muted: #67695f; --paper: #f1eee5; --sheet: #fbf9f2;
+      --line: #c9c7c0; --leaf: #252522; --leaf-soft: #e6e4dc;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-
     @media (prefers-color-scheme: dark) {
-      :root {
-        --font-color: #f5f5f5;
-        --bg: #222;
-        --card-bg: #333;
-        --accent-color: #6fae83;
-        --subtitle-color: #b0bfc7;
-      }
+      :root { --ink: #f3f1e9; --muted: #b4b2a9; --paper: #1c1c19; --sheet: #272722;
+        --line: #504f45; --leaf: #d8d6ce; --leaf-soft: #393934; }
+      .brand-mark { filter: invert(1); }
     }
-
+    *, *::before, *::after { box-sizing: border-box; }
     body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
-      background: var(--bg);
-      color: var(--font-color);
+      margin: 0; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+      padding: clamp(16px, 4vh, 36px) 14px;
+      background: linear-gradient(90deg, rgba(71,63,45,.025) 1px, transparent 1px),
+        linear-gradient(rgba(71,63,45,.025) 1px, transparent 1px), var(--paper);
+      background-size: 24px 24px; color: var(--ink);
     }
-
     .card {
-      width: min(100%, 440px);
-      box-sizing: border-box;
-      background: var(--card-bg);
-      border-radius: 16px;
-      padding: 28px 24px;
+      width: min(100%, 560px); position: relative; background: var(--sheet);
+      border: 1px solid var(--ink); padding: 28px clamp(18px, 5vw, 32px);
+      box-shadow: 5px 5px 0 rgba(32,37,31,.09);
     }
-
-    h1 {
-      margin: 0 0 8px;
-      font-size: 1.5rem;
-    }
-
-    h2 {
-      margin: 24px 0 4px;
-      font-size: 1rem;
-    }
-
-    p {
-      line-height: 1.45;
-    }
-
-    a {
-      color: var(--accent-color);
-    }
-
-    .muted {
-      color: var(--subtitle-color);
-      font-size: 0.9rem;
-    }
-
+    .card::before { content: ""; position: absolute; inset: 7px; border: 1px solid var(--line); pointer-events: none; }
+    .brand { display: flex; align-items: center; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .brand .brand-mark { width: 42px; height: 28px; flex: none; object-fit: contain; }
+    .brand strong { font-size: 1.1rem; letter-spacing: .015em; }
+    .eyebrow { margin: 20px 0 5px; color: var(--leaf); font-size: .76rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    h1 { margin: 0 0 6px; font-size: clamp(1.35rem, 5vw, 1.65rem); line-height: 1.22; }
+    h2 { margin: 22px 0 6px; font-size: 1rem; }
+    p { line-height: 1.5; }
+    a { color: var(--leaf); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    .muted { color: var(--muted); font-size: .92rem; }
+    #msg { margin: 12px 0 16px; padding: 12px 14px; border-left: 3px solid var(--leaf); background: var(--leaf-soft); }
+    #signal { padding: 10px 12px; border: 1px solid var(--line); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .btn {
-      display: inline-block;
-      padding: 10px 16px;
-      border: 0;
-      border-radius: 10px;
-      background: var(--accent-color);
-      color: #fff;
-      font-size: 1rem;
-      text-decoration: none;
-      cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 9px 16px;
+      border: 1px solid var(--leaf); border-radius: 3px; background: var(--leaf); color: #fff;
+      font: inherit; font-weight: 650; text-decoration: none; cursor: pointer;
     }
-
-    input[type="file"] {
-      display: block;
-      margin: 8px 0;
-    }
-
-    .hidden {
-      display: none;
-    }
+    .btn:hover { background: #10100f; }
+    .btn:focus-visible, input:focus-visible { outline: 3px solid color-mix(in srgb, var(--leaf) 28%, transparent); outline-offset: 2px; }
+    .btn-secondary { background: transparent; color: var(--leaf); }
+    input[type="file"] { display: block; width: 100%; max-width: 100%; margin: 10px 0 12px; color: var(--muted); font: inherit; }
+    input[type="file"]::file-selector-button { min-height: 40px; margin-right: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 3px; background: var(--sheet); color: var(--ink); font: inherit; cursor: pointer; }
+    .divider { height: 1px; margin: 20px 0; background: var(--line); }
+    .fineprint { margin: 20px 0 0; color: var(--muted); font-size: .82rem; }
+    .upload-status { overflow-wrap: anywhere; }
+    .hidden { display: none; }
+    @media (max-width: 420px) { .card { padding: 22px 16px; } .card::before { inset: 5px; } }
   </style>
 </head>
 
 <body>
-  <div class="card">
-    <h1>%%CROSSPOINT%%</h1>
-    <p id="msg">Checking the web interface…</p>
-    <p id="done" class="hidden"><a class="btn" href="/">Open the web interface</a></p>
-    <p id="retry" class="hidden"><button class="btn" onclick="install('release')">Try the download again</button></p>
+  <main class="card">
+    <div class="brand">
+      <!--#include file="shared/BrandMark.html.inc" -->
+      <strong>X4Libris</strong>
+    </div>
+    <p class="eyebrow">Xteink X4 Pro</p>
+    <h1>Установка веб-интерфейса</h1>
+    <p id="msg" role="status" aria-live="polite">Проверяем состояние веб-интерфейса…</p>
+    <div id="done" class="hidden actions"><a class="btn" href="/">Открыть веб-интерфейс</a></div>
+    <div id="retry" class="hidden actions"><button class="btn" onclick="install('release')">Повторить загрузку</button></div>
     <p id="signal" class="muted hidden"></p>
     <div id="manual" class="hidden">
-      <h2>Install from a file</h2>
-      <p class="muted">Download <b id="asset"></b> from <span id="release">the release page</span> and choose
-        it here, or copy it to the top folder of the SD card and reload this page.</p>
+      <div class="divider"></div>
+      <h2>Установить из файла</h2>
+      <p class="muted">Скачайте <b id="asset"></b> из <span id="release">раздела выпусков X4Libris</span>, выберите файл здесь или скопируйте его в корень SD-карты и обновите страницу.</p>
       <input type="file" id="bundle" accept=".bin" />
-      <button class="btn" onclick="uploadBundle()">Install</button>
-      <h2>Upload books</h2>
-      <p class="muted">Works without the web interface. Files go to the top folder of the SD card.</p>
+      <div class="actions"><button class="btn" onclick="uploadBundle()">Установить пакет</button></div>
+      <h2>Передать книги</h2>
+      <p class="muted">Передача файлов доступна и без установленного веб-интерфейса. Книги сохраняются в корень SD-карты.</p>
       <input type="file" id="books" multiple />
-      <button class="btn" onclick="uploadBooks()">Upload</button>
+      <div class="actions"><button class="btn btn-secondary" onclick="uploadBooks()">Передать книги</button></div>
       <p id="upload" class="muted"></p>
     </div>
-  </div>
+    <p class="fineprint">X4Libris · Чтение в своём ритме</p>
+  </main>
   <script>
     const $ = (id) => document.getElementById(id);
     let st = {};
@@ -119,8 +97,24 @@
     function say(text) { $('msg').textContent = text; }
     function show(id, on) { $(id).classList.toggle('hidden', !on); }
 
-    const kb = (n) => Math.round(n / 1024) + ' KB';
-    const secs = (ms) => (ms / 1000).toFixed(1) + ' s';
+    function friendlyError(error) {
+      const messages = {
+        'the download from GitHub failed': 'не удалось загрузить файл из GitHub',
+        'this build has no release to download from': 'для этой сборки нет доступного выпуска',
+        'no bundle file on the SD card': 'пакет не найден на SD-карте',
+        'the file is not the bundle for this firmware': 'файл не подходит этой прошивке',
+        'writing the SD card failed': 'не удалось записать данные на SD-карту',
+        'not enough memory': 'недостаточно памяти',
+        'no internet connection in hotspot mode': 'в режиме точки доступа нет доступа к интернету',
+        'unknown source': 'неизвестный источник установки'
+      };
+      if (messages[error]) return messages[error];
+      if (/\b\d{3}\b/.test(error || '')) return 'устройство ответило ошибкой ' + (error.match(/\b\d{3}\b/) || [''])[0];
+      return error ? 'не удалось выполнить операцию' : 'неизвестная ошибка';
+    }
+
+    const kb = (n) => Math.round(n / 1024) + ' КБ';
+    const secs = (ms) => (ms / 1000).toFixed(1) + ' с';
 
     // Below about -75 dBm a reader's Wi-Fi loses enough packets for an upload to stall.
     function weakSignal(rssi) {
@@ -129,8 +123,7 @@
 
     function showSignal() {
       if (weakSignal(st.rssi)) {
-        $('signal').textContent = 'The reader\'s Wi-Fi signal is weak (' + st.rssi + ' dBm), so an upload may break ' +
-          'off: bring it closer to the router, or copy the file to the SD card instead.';
+        $('signal').textContent = 'Слабый сигнал Wi-Fi (' + st.rssi + ' dBm): передача может оборваться. Поднесите устройство ближе к роутеру или скопируйте файл на SD-карту.';
       }
       show('signal', weakSignal(st.rssi));
     }
@@ -145,20 +138,19 @@
     async function install(source) {
       show('manual', false);
       show('retry', false);
-      say(source === 'release' ? 'Downloading the web interface…' : 'Installing the web interface…');
+      say(source === 'release' ? 'Загружаем веб-интерфейс…' : 'Устанавливаем веб-интерфейс…');
       try {
         const r = await fetch('/api/web/install?source=' + source, { method: 'POST' });
         const j = await r.json();
-        if (!j.ok) return fail('Installing failed: ' + j.error + '.');
-        say('The web interface is installed.');
+        if (!j.ok) return fail('Не удалось установить веб-интерфейс: ' + friendlyError(j.error) + '.');
+        say('Веб-интерфейс установлен.');
         location.replace('/');
       } catch (e) {
-        fail('Installing failed: the device did not answer.');
+        fail('Не удалось установить веб-интерфейс: устройство не ответило.');
       }
     }
 
-    // '' when the file arrived, else why not. XMLHttpRequest rather than fetch for its progress
-    // events; onProgress(text) gets e.g. "120 KB of 448 KB".
+    // Пустая строка означает успешную передачу. XMLHttpRequest нужен для отображения прогресса.
     function upload(file, name, onProgress) {
       return new Promise((resolve) => {
         const fd = new FormData();
@@ -166,29 +158,28 @@
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload?path=/');
         xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) onProgress(kb(Math.min(e.loaded, file.size)) + ' of ' + kb(file.size));
+          if (e.lengthComputable) onProgress(kb(Math.min(e.loaded, file.size)) + ' из ' + kb(file.size));
         };
-        xhr.onload = () => resolve(xhr.status === 200 ? '' : (xhr.responseText || 'the reader answered ' + xhr.status));
+        xhr.onload = () => resolve(xhr.status === 200 ? '' : (xhr.responseText || 'устройство ответило кодом ' + xhr.status));
         xhr.onerror = () => brokenOff(file, name).then(resolve);
         xhr.send(fd);
       });
     }
 
-    // The reader drops an upload that stalls or loses its connection without answering it, so
-    // the browser sees only the connection go. The reader keeps its own account of it.
+    // Если передача прерывается без ответа, читаем результат, сохранённый устройством.
     async function brokenOff(file, name) {
-      let text = 'the connection to the reader broke off.';
+      let text = 'соединение с устройством прервалось.';
       try {
         st = await (await fetch('/api/web/status')).json();
       } catch (e) {
-        return text + ' The reader does not answer any more.';
+        return text + ' Устройство больше не отвечает.';
       }
       const u = st.lastUpload;
       if (u && u.name === name) {
-        text = 'the reader received ' + kb(u.received) + ' of ' + kb(file.size) + ' in ' + secs(u.ms) + ', then ' + {
-          stalled: 'nothing more for ' + secs(u.idleMs) + ', and gave up.',
-          cancelled: 'the upload was cancelled on the reader.',
-          closed: 'the connection was closed.'
+        text = 'устройство получило ' + kb(u.received) + ' из ' + kb(file.size) + ' за ' + secs(u.ms) + ', затем ' + {
+          stalled: 'не получало данные ' + secs(u.idleMs) + ' и остановило передачу.',
+          cancelled: 'передача была отменена на устройстве.',
+          closed: 'соединение было закрыто.'
         }[u.reason];
       }
       return text;
@@ -197,49 +188,49 @@
     async function uploadBundle() {
       const file = $('bundle').files[0];
       if (!file) return;
-      say('Uploading…');
+      say('Передаём файл…');
       // Saved under the release asset's name, which is where the installer looks.
-      const error = await upload(file, st.asset, (progress) => say('Uploading: ' + progress + '…'));
-      if (error) return fail('Uploading failed: ' + error);
+      const error = await upload(file, st.asset, (progress) => say('Передача: ' + progress + '…'));
+      if (error) return fail('Не удалось передать файл: ' + friendlyError(error) + '.');
       install('card');
     }
 
     async function uploadBooks() {
       const files = $('books').files;
       for (const file of files) {
-        const status = (text) => ($('upload').textContent = 'Uploading ' + file.name + ': ' + text + '…');
-        status('starting');
+        const status = (text) => ($('upload').textContent = 'Передача ' + file.name + ': ' + text + '…');
+        status('начало');
         const error = await upload(file, file.name, status);
         if (error) {
-          $('upload').textContent = file.name + ': ' + error;
+          $('upload').textContent = file.name + ': ' + friendlyError(error) + '.';
           return showSignal();
         }
       }
-      $('upload').textContent = files.length + ' file(s) uploaded.';
+      $('upload').textContent = 'Передано файлов: ' + files.length + '.';
     }
 
     (async () => {
       try {
         st = await (await fetch('/api/web/status')).json();
       } catch (e) {
-        return fail('The device did not answer.');
+        return fail('Читалка не ответила.');
       }
       $('asset').textContent = st.asset;
       if (st.release) {
         const a = document.createElement('a');
         a.href = 'https://github.com/' + st.repo + '/releases/tag/' + st.release;
-        a.textContent = 'release ' + st.release;
+        a.textContent = 'выпуска X4Libris ' + st.release;
         $('release').replaceChildren(a);
       }
       if (st.state === 'installed') {
-        say('The web interface is installed.');
+        say('Веб-интерфейс установлен.');
         return show('done', true);
       }
       if (st.onCard) return install('card');
       if (st.online && st.release) return install('release');
       fail(st.release
-        ? 'The web interface is not installed, and in hotspot mode the device cannot download it.'
-        : 'The web interface is not installed. This is a development build, so there is no release to download it from: use the web-*.bin from the build folder.');
+        ? 'Веб-интерфейс ещё не установлен. В режиме точки доступа читалка не может скачать пакет из интернета.'
+        : 'Веб-интерфейс ещё не установлен. Скачайте указанный пакет из выпуска X4Libris или установите его с SD-карты.');
     })();
   </script>
 </body>

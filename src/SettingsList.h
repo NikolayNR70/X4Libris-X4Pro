@@ -691,8 +691,6 @@ inline void buildSettings(const RowSink& emit) {
                          {StrId::STR_VIEW_FILENAMES, StrId::STR_VIEW_DETAILS, StrId::STR_VIEW_COVERS},
                          "fileBrowserView", StrId::STR_CAT_SYSTEM)
            .withSubmenu(StrId::STR_SHOW_FILES));
-  emit(SettingInfo::Toggle(StrId::STR_INCLUDE_BETA_UPDATES, &CrossPointSettings::includeBetaUpdates, "includeRcUpdates",
-                           StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_SKIP_HTTPS_VALIDATION, &CrossPointSettings::skipHttpsValidation,
                            "skipHttpsValidation", StrId::STR_CAT_SYSTEM));
   // OPDS download settings are edited from the OPDS server list. Keep them

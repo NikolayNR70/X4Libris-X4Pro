@@ -1,7 +1,7 @@
 #pragma once
 
 // Tracks an individual setting edit session without changing the persistent
-// representation used by Witchhunt v1.  The original EPUB style is encoded by
+// representation used by the initial X4Libris format settings.  The original EPUB style is encoded by
 // a zero persisted choice; -1 (global inheritance) is intentionally different.
 // A session started with an existing explicit choice restores that choice if
 // the user undoes all adjustments.  A session started at publisher CSS stays

@@ -179,7 +179,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   http.setAllowCertificateDateErrors(!clockReady);
   http.setTimeout(timeoutMs);
   http.setTotalTimeout(timeoutMs);
-  http.setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
+  http.setUserAgent("X4Libris-ESP32-" CROSSPOINT_VERSION);
   if (!username.empty() && !password.empty()) {
     http.setBasicAuth(username, password);
   }
@@ -277,7 +277,7 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   if (!impl->http) {
     impl->http = std::make_unique<crosspoint::SecureHttpClient>();
     impl->http->setTimeout(HTTP_TIMEOUT_MS);
-    impl->http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
+    impl->http->setUserAgent("X4Libris-ESP32-" CROSSPOINT_VERSION);
   }
   // Re-applied per call, like the clock verdict below: a session outlives a
   // single request and must not carry a previous caller's policy.

@@ -437,7 +437,7 @@ TEST(FontManifestParserTest, ParsesTheShippedManifest) {
   EXPECT_FALSE(parser.hasError());
   EXPECT_TRUE(parser.complete());
   EXPECT_EQ(parser.version(), 2);
-  EXPECT_STREQ(parser.baseUrl(), "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/");
+  EXPECT_STREQ(parser.baseUrl(), "https://raw.githubusercontent.com/NikolayNR70/X4Libris-X4Pro/main/assets/sd-fonts/");
   EXPECT_FALSE(parser.baseUrlOverflow());
   EXPECT_GT(tally.families, 0);
   EXPECT_GT(tally.files, 0);

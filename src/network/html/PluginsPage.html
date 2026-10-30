@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--#include file="shared/ThemeInit.html.inc" -->
-    <title>Plugins - %%CROSSPOINT%%</title>
+    <title>Плагины — X4Libris</title>
     <style>
       <!--#include file="shared/Theme.css.inc" -->
       <!--#include file="shared/NavLinks.css.inc" -->
@@ -49,39 +49,39 @@
 
     <main class="page page-narrow">
       <div class="page-head">
-        <h1>Plugins</h1>
-        <p class="page-intro">Plugins add cards to the File Manager or Settings page.</p>
+        <h1>Плагины</h1>
+        <p class="page-intro">Плагины могут добавлять карточки в файловый менеджер и настройки.</p>
       </div>
 
       <section class="card">
-        <h2>Installed plugins</h2>
+        <h2>Установленные плагины</h2>
         <p class="card-intro">
-          Plugins run in your browser, not on the reader, and can do anything this web interface can do with
-          your SD card.
+          Плагины работают в браузере, а не на устройстве, и могут выполнять любые действия, доступные веб-интерфейсу, с
+          картой SD.
         </p>
-        <div id="installed"><p class="empty">Loading...</p></div>
+        <div id="installed"><p class="empty">Загрузка…</p></div>
         <div id="status" role="status"></div>
       </section>
 
       <section class="card">
-        <h2>Available plugins</h2>
-        <div id="catalog"><p class="empty">Loading the catalog...</p></div>
+        <h2>Доступные плагины</h2>
+        <div id="catalog"><p class="empty">Загрузка каталога…</p></div>
       </section>
 
       <section class="card">
-        <h2>Install from a file</h2>
+        <h2>Установить из файла</h2>
         <p class="notice">
-          Only install plugins you trust: a plugin can read, change and delete anything on the SD card
-          through this web interface. The <b>Reaches</b> line says which internet sites it may contact
-          through the reader.
+          Устанавливайте только те плагины, которым доверяете: через веб-интерфейс плагин может читать,
+          изменять и удалять данные на карте SD. В строке <b>«Доступ»</b> перечислены сайты, к которым
+          плагин может обращаться через устройство.
         </p>
         <form class="upload-form" id="zipForm">
           <input type="file" id="zipFile" accept=".zip" required />
-          <button type="submit" class="btn btn-primary">Install</button>
+          <button type="submit" class="btn btn-primary">Установить</button>
         </form>
         <p class="plugin-meta">
-          A <code>.zip</code> holding a plugin folder: <code>plugin.js</code>, usually a
-          <code>manifest.json</code>, and any files they use, all side by side.
+          ZIP-архив с файлами плагина: <code>plugin.js</code>, обычно также <code>manifest.json</code>
+          и необходимые ему файлы. Все файлы должны лежать рядом, без вложенных папок.
         </p>
       </section>
     </main>
@@ -91,7 +91,7 @@
       const INSTALL_ROOT = '/.crosspoint/plugins';
       const MOUNT_LABELS = { files: 'File Manager', settings: 'Settings' };
       let installed = [];
-      let repo = 'jpirnay/witchhunt-reader';
+      let repo = 'NikolayNR70/X4Libris-X4Pro';
 
       function setStatus(text, kind) {
         const el = $('status');

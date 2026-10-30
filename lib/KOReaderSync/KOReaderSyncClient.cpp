@@ -335,7 +335,7 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   // Ported from CrossInk commit 56a29f618 ("reject oversized KOReader authentication responses
   // (#783)", Julia Nguyen), which aborts the request instead; here the status still comes through.
   http->setMaxBufferedBody(KO_MAX_RESPONSE_BYTES);
-  http->setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
+  http->setUserAgent("X4Libris-ESP32-" CROSSPOINT_VERSION);
   http->clearHeaders();
   applyAuthHeaders(*http);
   if (contentType && *contentType) {

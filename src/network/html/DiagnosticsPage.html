@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!--#include file="shared/ThemeInit.html.inc" -->
-  <title>Diagnostics - %%CROSSPOINT%%</title>
+  <title>Диагностика — X4Libris</title>
   <style>
     <!--#include file="shared/Theme.css.inc" -->
     <!--#include file="shared/NavLinks.css.inc" -->
@@ -76,52 +76,52 @@
 
   <main class="page">
     <div class="page-head">
-      <h1>Diagnostics</h1>
-      <p class="page-intro">How the reader last slept and started, and a report to attach to a bug.</p>
+      <h1>Диагностика</h1>
+      <p class="page-intro">Сведения о последнем переходе в сон и запуске устройства, а также отчёт для сообщения об ошибке.</p>
     </div>
 
     <section class="card report">
       <div class="report-text">
-        <h2>Bug report</h2>
-        <p>Reporting a problem? Download this report and attach it to the issue. It holds the firmware version,
-          the device status and the sleep/boot history shown below. It leaves out the IP and MAC address and
-          holds no passwords. The same history is on the reader under Settings → System → Boot Diagnostics.</p>
+        <h2>Отчёт об ошибке</h2>
+        <p>Сообщаете о проблеме? Скачайте этот отчёт и приложите его к сообщению. В нём указаны версия прошивки,
+          состояние устройства и история сна и запусков. IP- и MAC-адреса и пароли в отчёт не включаются.
+          Эта же история доступна на устройстве: Настройки → Система → Диагностика запуска.</p>
       </div>
       <div class="report-actions">
-        <button id="download" class="btn btn-primary" type="button" disabled>Download report</button>
-        <span class="hint" id="loadState">Loading...</span>
+        <button id="download" class="btn btn-primary" type="button" disabled>Скачать отчёт</button>
+        <span class="hint" id="loadState">Загрузка…</span>
       </div>
     </section>
 
     <div class="diag-grid">
       <div class="diag-col">
         <section class="card">
-          <h2>Device</h2>
+          <h2>Устройство</h2>
           <div id="device"></div>
         </section>
 
         <section class="card">
-          <h2>Last sleep</h2>
+          <h2>Последний переход в сон</h2>
           <div id="lastSleep"></div>
         </section>
       </div>
 
       <div class="diag-col">
         <section class="card">
-          <h2>This boot</h2>
+          <h2>Текущий запуск</h2>
           <div id="thisBoot"></div>
-          <h3>Boot phases</h3>
-          <p class="hint">Time each step of starting up took. Steps the boot did not go through are left out.</p>
+          <h3>Этапы запуска</h3>
+          <p class="hint">Длительность каждого этапа запуска. Этапы, которые не выполнялись, не показаны.</p>
           <table id="phases"></table>
         </section>
       </div>
     </div>
 
     <section class="card">
-      <h2>Sleep and boot history</h2>
+      <h2>История сна и запусков</h2>
       <p class="hint">
-        Newest first. A healthy cycle is a sleep that reached deep sleep (or powered off as asked) followed by a
-        boot that woke from it; two boots in a row mean the session in between ended without sleeping.
+        Сначала показаны новые записи. Успешный цикл: устройство перешло в глубокий сон (или отключило питание по запросу),
+        а затем пробудилось. Два запуска подряд означают, что между ними устройство не переходило в сон.
       </p>
       <div id="history"></div>
     </section>
@@ -131,84 +131,84 @@
     // The device reports short untranslated tokens (the ones its own Boot Diagnostics
     // screen prints, so reports stay comparable); these are their plain-English readings.
     const RESET_REASONS = {
-      'power-on': 'Power-on or reset button (this chip cannot tell them apart)',
-      'ext-reset': 'Reset pin',
-      'sw-restart': 'Software restart',
-      'panic': 'Crash (panic)',
-      'int-wdt': 'Interrupt watchdog',
-      'task-wdt': 'Task watchdog',
-      'other-wdt': 'Watchdog',
-      'deep-sleep': 'Woke from deep sleep',
-      'brownout': 'Brownout (the supply voltage dropped)',
-      'sdio': 'SDIO reset',
-      'usb': 'USB reset (flashing, or a serial monitor opening the port)',
-      'jtag': 'JTAG reset',
-      'efuse': 'eFuse error',
-      'power-glitch': 'Power glitch',
-      'cpu-lockup': 'CPU lock-up',
-      'unknown': 'Unknown',
-      'other': 'Other',
+      'power-on': 'Включение или сброс кнопкой (чип не различает эти причины)',
+      'ext-reset': 'Сигнал на выводе сброса',
+      'sw-restart': 'Программный перезапуск',
+      'panic': 'Аварийная остановка программы',
+      'int-wdt': 'Сторожевой таймер прерываний',
+      'task-wdt': 'Сторожевой таймер задачи',
+      'other-wdt': 'Сторожевой таймер',
+      'deep-sleep': 'Пробуждение из глубокого сна',
+      'brownout': 'Падение напряжения питания',
+      'sdio': 'Сброс SDIO',
+      'usb': 'Сброс USB (прошивка или открытие последовательного порта)',
+      'jtag': 'Сброс JTAG',
+      'efuse': 'Ошибка eFuse',
+      'power-glitch': 'Сбой питания',
+      'cpu-lockup': 'Зависание процессора',
+      'unknown': 'Неизвестно',
+      'other': 'Другое',
     };
     const WAKE_CAUSES = {
-      'none': 'Not a wake from sleep',
-      'timer': 'Timer',
-      'gpio': 'Button (GPIO)',
-      'ext0': 'RTC pin (EXT0)',
-      'ext1': 'Button (EXT1)',
-      'uart': 'Serial port',
-      'ulp': 'Low-power coprocessor',
-      'other': 'Other',
+      'none': 'Не пробуждение из сна',
+      'timer': 'Таймер',
+      'gpio': 'Кнопка (GPIO)',
+      'ext0': 'Вывод RTC (EXT0)',
+      'ext1': 'Кнопка (EXT1)',
+      'uart': 'Последовательный порт',
+      'ulp': 'Энергоэффективный сопроцессор',
+      'other': 'Другое',
     };
     const GATE_VERDICTS = {
-      'not-pressed': 'button not held',
-      'short': 'short press accepted',
-      'long-hold': 'long hold accepted',
-      'double-click': 'double-click accepted',
-      'released-early': 'released too early',
-      'no-second-press': 'second press never came',
+      'not-pressed': 'кнопка не удерживалась',
+      'short': 'короткое нажатие принято',
+      'long-hold': 'долгое нажатие принято',
+      'double-click': 'двойное нажатие принято',
+      'released-early': 'кнопку отпустили слишком рано',
+      'no-second-press': 'второго нажатия не было',
     };
     const STAGES = {
-      'none': 'nothing recorded',
-      'requested': 'sleep requested',
-      'state-saved': 'state saved',
-      'screen-painted': 'sleep screen painted',
-      'panel-asleep': 'display asleep',
-      'rails-set': 'power rails set',
-      'await-release': 'waiting for the power button to be released',
-      'release-timeout': 'gave up waiting for the button release',
-      'wake-armed': 'wake-up armed (the last step before deep sleep)',
+      'none': 'нет данных',
+      'requested': 'запрошен переход в сон',
+      'state-saved': 'состояние сохранено',
+      'screen-painted': 'заставка сна показана',
+      'panel-asleep': 'экран переведён в сон',
+      'rails-set': 'линии питания настроены',
+      'await-release': 'ожидание отпускания кнопки питания',
+      'release-timeout': 'истекло время ожидания отпускания кнопки',
+      'wake-armed': 'пробуждение включено (последний этап перед глубоким сном)',
     };
     const TRIGGERS = {
-      'unknown': 'unknown',
-      'power-hold': 'power button held',
-      'timeout': 'inactivity timeout',
-      'button': 'a button set to Sleep',
-      'gate-rejected': 'woke, but the press was not accepted',
-      'usb-boot': 'USB power started it',
+      'unknown': 'неизвестно',
+      'power-hold': 'удержание кнопки питания',
+      'timeout': 'тайм-аут бездействия',
+      'button': 'нажата кнопка, назначенная на переход в сон',
+      'gate-rejected': 'устройство проснулось, но нажатие не принято',
+      'usb-boot': 'запуск от питания USB',
     };
     const OUTCOMES = {
-      'slept': 'Reached deep sleep',
-      'release-timeout': 'STUCK: the button was never released; slept anyway',
-      'powered-off': 'Powered off as asked (a reset looks the same)',
-      'powered-off-unasked': 'Powered off although the clock was kept alive',
-      'did-not-sleep': 'NEVER REACHED DEEP SLEEP',
-      'unfinished': 'No boot recorded after this sleep',
+      'slept': 'Устройство перешло в глубокий сон',
+      'release-timeout': 'Кнопка не была отпущена; устройство всё равно перешло в сон',
+      'powered-off': 'Питание отключено по запросу (сброс выглядит так же)',
+      'powered-off-unasked': 'Питание отключено, хотя часы продолжали работать',
+      'did-not-sleep': 'Устройство не перешло в глубокий сон',
+      'unfinished': 'После перехода в сон запуск не зарегистрирован',
     };
     const BAD_OUTCOMES = ['release-timeout', 'powered-off-unasked', 'did-not-sleep'];
     const PHASES = {
-      'entry': 'Start-up code begins',
-      'nvs': 'Start-up settings read',
-      'gate': 'Power-button wake decided',
-      'hw': 'Hardware brought up',
-      'ser': 'USB serial opened',
-      'recov': 'Recovery button check',
-      'sd': 'SD card mounted',
-      'cfg': 'Settings and state loaded',
-      'disp': 'Display, memory and fonts',
-      'paint': 'First picture on the screen',
-      'store': 'Clock, recent books, bookmarks, stats',
-      'route': 'First screen opened',
-      'rel': 'Power button released',
+      'entry': 'Начало загрузки',
+      'nvs': 'Чтение параметров запуска',
+      'gate': 'Проверка пробуждения кнопкой питания',
+      'hw': 'Запуск оборудования',
+      'ser': 'Запуск последовательного порта USB',
+      'recov': 'Проверка кнопки восстановления',
+      'sd': 'Подключение карты SD',
+      'cfg': 'Загрузка настроек и состояния',
+      'disp': 'Подготовка экрана, памяти и шрифтов',
+      'paint': 'Первое изображение на экране',
+      'store': 'Часы, недавние книги, закладки и статистика',
+      'route': 'Открытие первого экрана',
+      'rel': 'Кнопка питания отпущена',
     };
 
     const word = (map, token) => (token in map ? map[token] : token);
@@ -233,17 +233,17 @@
     }
 
     function formatBytes(bytes) {
-      if (bytes == null) return 'N/A';
-      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
-      if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return bytes + ' B';
+      if (bytes == null) return 'Нет данных';
+      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' МБ';
+      if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' КБ';
+      return bytes + ' Б';
     }
 
     function formatUptime(seconds) {
-      if (seconds == null) return 'N/A';
+      if (seconds == null) return 'Нет данных';
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
-      return h + 'h ' + String(m).padStart(2, '0') + 'm ' + String(seconds % 60).padStart(2, '0') + 's';
+      return h + ' ч ' + String(m).padStart(2, '0') + ' мин ' + String(seconds % 60).padStart(2, '0') + ' с';
     }
 
     function renderDevice() {
@@ -252,25 +252,25 @@
       const s = statusData;
       const hw = diagData && diagData.hardware;
       if (s) {
-        addRow(c, 'Firmware', s.version || 'N/A');
-        addRow(c, 'Device', s.deviceType
-          ? s.deviceType + (s.displayWidth ? ' (' + s.displayWidth + ' × ' + s.displayHeight + ' px)' : '')
-          : 'N/A');
+        addRow(c, 'Прошивка', s.version || 'Нет данных');
+        addRow(c, 'Устройство', s.deviceType
+          ? s.deviceType + (s.displayWidth ? ' (' + s.displayWidth + ' × ' + s.displayHeight + ' пикс.)' : '')
+          : 'Нет данных');
       }
       if (hw) {
-        addRow(c, 'Board profile', hw.board);
-        addRow(c, 'Panel controller', hw.displayController + (hw.promotedByProbe ? ' (promoted by probe)' : ''));
-        addRow(c, 'Panel probe', hw.panelProbe || 'did not run');
+        addRow(c, 'Профиль платы', hw.board);
+        addRow(c, 'Контроллер экрана', hw.displayController + (hw.promotedByProbe ? ' (определён проверкой)' : ''));
+        addRow(c, 'Проверка экрана', hw.panelProbe || 'не выполнялась');
       }
       if (s) {
-        addRow(c, 'Chip', (s.chipVersion || 'N/A') + (s.cpuMHz ? ', ' + s.cpuMHz + ' MHz' : ''));
-        addRow(c, 'Heap free / lowest / largest block',
+        addRow(c, 'Чип', (s.chipVersion || 'Нет данных') + (s.cpuMHz ? ', ' + s.cpuMHz + ' МГц' : ''));
+        addRow(c, 'Свободная память / минимум / наибольший блок',
           formatBytes(s.freeHeap) + ' / ' + formatBytes(s.minFreeHeap) + ' / ' + formatBytes(s.maxAllocHeap));
-        addRow(c, 'Battery', s.batteryPercent != null ? s.batteryPercent + '%' + (s.charging ? ' (charging)' : '') : 'N/A');
-        addRow(c, 'Uptime', formatUptime(s.uptime));
-        addRow(c, 'Wi-Fi', (s.mode || 'N/A') + (s.mode === 'STA' && s.rssi ? ', ' + s.rssi + ' dBm' : ''));
+        addRow(c, 'Батарея', s.batteryPercent != null ? s.batteryPercent + '%' + (s.charging ? ' (зарядка)' : '') : 'Нет данных');
+        addRow(c, 'Время работы', formatUptime(s.uptime));
+        addRow(c, 'Wi-Fi', (s.mode || 'Нет данных') + (s.mode === 'STA' && s.rssi ? ', ' + s.rssi + ' дБм' : ''));
       }
-      if (!s && !hw) c.appendChild(el('p', 'hint', 'Could not load the device status.'));
+      if (!s && !hw) c.appendChild(el('p', 'hint', 'Не удалось загрузить состояние устройства.'));
     }
 
     function renderThisBoot() {
@@ -279,43 +279,43 @@
       c.textContent = '';
       table.textContent = '';
       if (!diagData) {
-        c.appendChild(el('p', 'hint', diagError || 'Loading...'));
+        c.appendChild(el('p', 'hint', diagError || 'Загрузка…'));
         return;
       }
       const b = diagData.thisBoot;
-      addRow(c, 'Reset reason', word(RESET_REASONS, b.resetReason));
+      addRow(c, 'Причина сброса', word(RESET_REASONS, b.resetReason));
       if (b.previousSessionSlept === null) {
-        addRow(c, 'Previous session', 'unknown (fewer than two records in the history)');
+        addRow(c, 'Предыдущий сеанс', 'неизвестно (в истории меньше двух записей)');
       } else {
-        addRow(c, 'Previous session', b.previousSessionSlept ? 'ended at the sleep path' : 'ended without sleeping (reset or crash)',
+        addRow(c, 'Предыдущий сеанс', b.previousSessionSlept ? 'завершился переходом в сон' : 'завершился без сна (сброс или сбой)',
           !b.previousSessionSlept);
       }
-      addRow(c, 'Wake cause', word(WAKE_CAUSES, b.wakeCause));
+      addRow(c, 'Причина пробуждения', word(WAKE_CAUSES, b.wakeCause));
       const g = b.wakeGate;
-      addRow(c, 'Wake gate', word(GATE_VERDICTS, g.verdict) + ' (held ' + g.heldMs + ' ms, needs ' + g.requiredMs +
-        ' ms, decided at ' + g.decidedAtMs + ' ms)');
+      addRow(c, 'Проверка кнопки пробуждения', word(GATE_VERDICTS, g.verdict) + ' (удержание ' + g.heldMs + ' мс, требуется ' + g.requiredMs +
+        ' мс, решение через ' + g.decidedAtMs + ' мс)');
       const a = b.abortedBoots;
       // A device that wakes, refuses the press and sleeps again never touches the screen:
       // this count is the only sign of it.
-      let aborted = a.thisRun ? a.thisRun + ' woke and refused to start' : 'none';
-      if (a.lifetime) aborted += ' (' + a.lifetime + ' ever recorded)';
-      if (a.undrained) aborted += ', ' + a.undrained + ' counted but not yet filed';
-      addRow(c, 'Aborted boots', aborted, a.thisRun > 0);
-      addRow(c, 'To first picture', b.firstPaintMs + ' ms');
+      let aborted = a.thisRun ? 'отказов запуска после пробуждения: ' + a.thisRun : 'нет';
+      if (a.lifetime) aborted += ' (всего: ' + a.lifetime + ')';
+      if (a.undrained) aborted += ', ещё не записано: ' + a.undrained;
+      addRow(c, 'Прерванные запуски', aborted, a.thisRun > 0);
+      addRow(c, 'До первого изображения', b.firstPaintMs + ' мс');
       const ls = b.lightSleep;
       const total = ls.sleptMs + ls.awakeMs;
-      addRow(c, 'Light sleep', Math.round(ls.sleptMs / 1000) + ' s slept (' + (total ? Math.round(ls.sleptMs * 100 / total) : 0) +
-        '%), ' + ls.attempts + ' tries, ' + ls.gpioWakes + ' button wakes');
+      addRow(c, 'Лёгкий сон', Math.round(ls.sleptMs / 1000) + ' с (' + (total ? Math.round(ls.sleptMs * 100 / total) : 0) +
+        '%), попыток: ' + ls.attempts + ', пробуждений кнопкой: ' + ls.gpioWakes);
 
       const head = el('tr');
-      ['Step', 'Took', 'Done at'].forEach((h, i) => head.appendChild(el('th', i ? 'num' : '', h)));
+      ['Этап', 'Длительность', 'Всего'].forEach((h, i) => head.appendChild(el('th', i ? 'num' : '', h)));
       table.appendChild(head);
       let previous = 0;
       for (const p of b.phases) {
         const tr = el('tr');
-        tr.appendChild(el('td', '', word(PHASES, p.name) + ' (' + p.name + ')'));
-        tr.appendChild(el('td', 'num', (p.ms - previous) + ' ms'));
-        tr.appendChild(el('td', 'num', p.ms + ' ms'));
+        tr.appendChild(el('td', '', word(PHASES, p.name)));
+        tr.appendChild(el('td', 'num', (p.ms - previous) + ' мс'));
+        tr.appendChild(el('td', 'num', p.ms + ' мс'));
         table.appendChild(tr);
         previous = p.ms;
       }
@@ -325,41 +325,41 @@
       const c = document.getElementById('lastSleep');
       c.textContent = '';
       if (!diagData) {
-        c.appendChild(el('p', 'hint', diagError || 'Loading...'));
+        c.appendChild(el('p', 'hint', diagError || 'Загрузка…'));
         return;
       }
       const s = diagData.history.find((r) => r.kind === 'sleep');
       if (!s) {
-        c.appendChild(el('p', 'hint', 'No sleep recorded yet.'));
+        c.appendChild(el('p', 'hint', 'Записей о переходе в сон пока нет.'));
         return;
       }
-      addRow(c, 'Verdict', word(OUTCOMES, s.outcome), BAD_OUTCOMES.includes(s.outcome));
-      addRow(c, 'Stopped at', word(STAGES, s.stage));
-      addRow(c, 'Trigger', word(TRIGGERS, s.trigger));
-      addRow(c, 'Battery latch', s.latchKept ? 'kept (the chip stays powered)' : 'cut (powers off)');
-      addRow(c, 'Release wait', s.releaseWaitMs + ' ms' + (s.releaseTimedOut ? ' (timed out)' : ''), s.releaseTimedOut);
+      addRow(c, 'Результат', word(OUTCOMES, s.outcome), BAD_OUTCOMES.includes(s.outcome));
+      addRow(c, 'Остановлено на этапе', word(STAGES, s.stage));
+      addRow(c, 'Причина', word(TRIGGERS, s.trigger));
+      addRow(c, 'Питание чипа', s.latchKept ? 'сохранено' : 'отключено');
+      addRow(c, 'Ожидание отпускания кнопки', s.releaseWaitMs + ' мс' + (s.releaseTimedOut ? ' (время истекло)' : ''), s.releaseTimedOut);
     }
 
     function describeRecord(r) {
       if (r.kind === 'sleep') {
-        const parts = ['Trigger: ' + word(TRIGGERS, r.trigger), 'reached: ' + word(STAGES, r.stage),
-          'battery latch ' + (r.latchKept ? 'kept' : 'cut')];
-        if (r.fromReader) parts.push('a book was open');
-        if (r.releaseTimedOut) parts.push('button release timed out after ' + r.releaseWaitMs + ' ms');
-        parts.push('awake ' + r.uptimeS + ' s before');
-        return { kind: 'Sleep', details: parts.join('; '), verdict: word(OUTCOMES, r.outcome), bad: BAD_OUTCOMES.includes(r.outcome) };
+        const parts = ['причина: ' + word(TRIGGERS, r.trigger), 'этап: ' + word(STAGES, r.stage),
+          'питание чипа ' + (r.latchKept ? 'сохранено' : 'отключено')];
+        if (r.fromReader) parts.push('была открыта книга');
+        if (r.releaseTimedOut) parts.push('ожидание отпускания кнопки истекло через ' + r.releaseWaitMs + ' мс');
+        parts.push('до этого устройство работало ' + r.uptimeS + ' с');
+        return { kind: 'Сон', details: parts.join('; '), verdict: word(OUTCOMES, r.outcome), bad: BAD_OUTCOMES.includes(r.outcome) };
       }
       if (r.kind === 'boot') {
-        const parts = ['Reset: ' + word(RESET_REASONS, r.resetReason), 'wake: ' + word(WAKE_CAUSES, r.wakeCause),
-          'gate: ' + word(GATE_VERDICTS, r.gate) + ' (held ' + r.gateHeldMs + ' ms, decided at ' + r.gateDecidedMs + ' ms)',
-          'SD card mounted at ' + r.sdMountMs + ' ms'];
-        return { kind: 'Boot', details: parts.join('; '), verdict: '', bad: false };
+        const parts = ['сброс: ' + word(RESET_REASONS, r.resetReason), 'пробуждение: ' + word(WAKE_CAUSES, r.wakeCause),
+          'проверка кнопки: ' + word(GATE_VERDICTS, r.gate) + ' (удержание ' + r.gateHeldMs + ' мс, решение через ' + r.gateDecidedMs + ' мс)',
+          'карта SD подключена через ' + r.sdMountMs + ' мс'];
+        return { kind: 'Запуск', details: parts.join('; '), verdict: '', bad: false };
       }
       if (r.kind === 'aborted') {
         return {
-          kind: 'Aborted',
-          details: 'Woke and went straight back to sleep ' + r.count + (r.capped ? '+' : '') + ' time' + (r.count === 1 ? '' : 's') +
-            ': ' + word(TRIGGERS, r.trigger) + (r.trigger === 'gate-rejected' ? ' (' + word(GATE_VERDICTS, r.gate) + ')' : ''),
+          kind: 'Отказ запуска',
+          details: 'после пробуждения устройство сразу вернулось в сон (' + r.count + (r.capped ? '+' : '') + ' раз): ' +
+            word(TRIGGERS, r.trigger) + (r.trigger === 'gate-rejected' ? ' (' + word(GATE_VERDICTS, r.gate) + ')' : ''),
           verdict: '',
           bad: true,
         };
@@ -371,11 +371,11 @@
       const list = document.getElementById('history');
       list.textContent = '';
       if (!diagData) {
-        list.appendChild(el('p', 'empty', diagError || 'Loading...'));
+        list.appendChild(el('p', 'empty', diagError || 'Загрузка…'));
         return;
       }
       if (!diagData.history.length) {
-        list.appendChild(el('p', 'empty', 'No records yet.'));
+        list.appendChild(el('p', 'empty', 'Записей пока нет.'));
         return;
       }
       for (const r of diagData.history) {

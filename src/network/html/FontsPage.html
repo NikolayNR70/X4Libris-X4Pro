@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--#include file="shared/ThemeInit.html.inc" -->
-    <title>Font Manager - %%CROSSPOINT%%</title>
+    <title>Менеджер шрифтов — X4Libris</title>
     <style>
       <!--#include file="shared/Theme.css.inc" -->
       <!--#include file="shared/NavLinks.css.inc" -->
@@ -125,98 +125,97 @@
 
     <main class="page">
       <div class="page-head">
-        <h1>Font Manager</h1>
-        <p class="page-intro">Reading fonts on the SD card: download them from the catalog, convert or upload your own,
-          or delete those you no longer use.</p>
+        <h1>Менеджер шрифтов</h1>
+        <p class="page-intro">Шрифты на карте памяти SD: скачивайте их из каталога, преобразуйте или загружайте свои,
+          а также удаляйте те, которыми больше не пользуетесь.</p>
       </div>
 
       <!-- One panel at a time, chosen in the menu; #installed, #download, #convert or #upload. -->
       <div class="side-layout">
         <aside class="side-nav">
           <nav aria-label="Font Manager">
-            <div class="cat-group">On the reader</div>
+            <div class="cat-group">На устройстве</div>
             <div class="cat-list">
-              <a class="cat-link" href="#installed" data-panel="installed"><span>Installed fonts</span>
+              <a class="cat-link" href="#installed" data-panel="installed"><span>Установленные шрифты</span>
                 <span class="cat-count" id="installedCount"></span></a>
             </div>
-            <div class="cat-group">Add fonts</div>
+            <div class="cat-group">Добавить шрифты</div>
             <div class="cat-list">
-              <a class="cat-link" href="#download" data-panel="download"><span>Download fonts</span>
+              <a class="cat-link" href="#download" data-panel="download"><span>Скачать шрифты</span>
                 <span class="cat-count" id="updateCount"></span></a>
-              <a class="cat-link" href="#convert" data-panel="convert"><span>Convert a font</span></a>
-              <a class="cat-link" href="#upload" data-panel="upload"><span>Upload a font</span></a>
+              <a class="cat-link" href="#convert" data-panel="convert"><span>Преобразовать шрифт</span></a>
+              <a class="cat-link" href="#upload" data-panel="upload"><span>Загрузить шрифт</span></a>
             </div>
           </nav>
         </aside>
 
         <div>
           <section class="card" id="panel-installed">
-            <h2>Installed fonts</h2>
-            <div id="families"><p class="empty">Loading...</p></div>
+            <h2>Установленные шрифты</h2>
+            <div id="families"><p class="empty">Загрузка…</p></div>
             <div id="installedStatus" role="status"></div>
           </section>
 
           <section class="card" id="panel-download" hidden>
-            <h2>Download fonts</h2>
+            <h2>Скачать шрифты</h2>
             <div class="toolbar">
-              <button id="refreshManifest" class="btn" type="button">Refresh catalog</button>
-              <button id="downloadAllRemote" class="btn btn-primary" type="button">Download all updates</button>
+              <button id="refreshManifest" class="btn" type="button">Обновить каталог</button>
+              <button id="downloadAllRemote" class="btn btn-primary" type="button">Скачать все обновления</button>
             </div>
             <div class="download-layout">
-              <div id="remoteFamilies"><p class="empty">Catalog not loaded</p></div>
+              <div id="remoteFamilies"><p class="empty">Каталог не загружен</p></div>
               <div class="status-panel" role="status">
-                <h3>Download status</h3>
-                <div id="remoteStatus" class="status-message"><p>Waiting for action...</p></div>
+                <h3>Состояние загрузки</h3>
+                <div id="remoteStatus" class="status-message"><p>Ожидание действия…</p></div>
               </div>
             </div>
           </section>
 
           <section class="card" id="panel-convert" hidden>
-            <h2>Convert a font</h2>
-            <p class="card-intro">Makes a font family for the reader from TrueType or OpenType files, here in your
-              browser: the same conversion as the fonts in the catalog.</p>
-            <div class="segmented convert-source" role="radiogroup" aria-label="Convert from">
-              <label><input type="radio" name="convertSource" value="files" checked><span>Font files</span></label>
-              <label><input type="radio" name="convertSource" value="book"><span>The fonts of an EPUB</span></label>
+            <h2>Преобразовать шрифт</h2>
+            <p class="card-intro">Создайте семейство шрифтов для устройства из файлов TrueType или OpenType прямо в браузере.
+              Преобразование выполняется так же, как для шрифтов из каталога.</p>
+            <div class="segmented convert-source" role="radiogroup" aria-label="Источник шрифта">
+              <label><input type="radio" name="convertSource" value="files" checked><span>Файлы шрифтов</span></label>
+              <label><input type="radio" name="convertSource" value="book"><span>Шрифты из EPUB</span></label>
             </div>
             <div id="sourceFiles">
-              <input type="file" id="convertFiles" accept=".ttf,.otf" multiple aria-label="Font files">
-              <p class="family-meta">Choose the family's files, up to four: regular, bold, italic and bold italic. Each
-                file's style is read from the font.</p>
+              <input type="file" id="convertFiles" accept=".ttf,.otf" multiple aria-label="Файлы шрифтов">
+              <p class="family-meta">Выберите до четырёх файлов семейства: обычный, полужирный, курсив и полужирный курсив.
+                Начертание каждого файла определяется по самому шрифту.</p>
             </div>
             <div id="sourceBook" hidden>
-              <input type="file" id="convertBook" accept=".epub" aria-label="An EPUB with embedded fonts">
-              <p class="family-meta">A book on the reader: open it with <strong>Details</strong> in the File Manager and
-                choose <strong>Convert its fonts</strong>.</p>
+              <input type="file" id="convertBook" accept=".epub" aria-label="EPUB со встроенными шрифтами">
+              <p class="family-meta">Для книги на устройстве откройте в файловом менеджере пункт <strong>Сведения</strong>
+                и выберите <strong>Преобразовать шрифты книги</strong>.</p>
               <div id="bookFamilies" class="book-families"></div>
             </div>
             <div id="styleTable" class="style-table" hidden></div>
             <div class="convert-options">
-              <label><span class="field-label">Family name</span>
+              <label><span class="field-label">Название семейства</span>
                 <input type="text" id="convertName" autocomplete="off" spellcheck="false"
-                  placeholder="Letters, digits, - and _"></label>
-              <label><span class="field-label">Characters</span>
+                  placeholder="Буквы, цифры, дефис и подчёркивание"></label>
+              <label><span class="field-label">Набор символов</span>
                 <select id="convertIntervals">
-                  <option value="builtin,latin-cyrillic,greek-letters,musical-symbols" selected>Latin, Cyrillic and Greek</option>
-                  <option value="builtin,latin-cyrillic,musical-symbols">Latin and Cyrillic</option>
+                  <option value="builtin,latin-cyrillic,greek-letters,musical-symbols" selected>Латиница, кириллица и греческий</option>
+                  <option value="builtin,latin-cyrillic,musical-symbols">Латиница и кириллица</option>
                 </select></label>
-              <div><span class="field-label">Sizes (points)</span>
+              <div><span class="field-label">Размеры (пункты)</span>
                 <div class="size-boxes" id="convertSizes"></div></div>
             </div>
-            <button type="button" id="convertBtn" class="btn btn-primary" disabled>Convert and install</button>
+            <button type="button" id="convertBtn" class="btn btn-primary" disabled>Преобразовать и установить</button>
             <div id="convertStatus" role="status"></div>
-            <p class="credit">A font that came with a book is licensed with that book: convert it for reading on your own
-              reader. The conversion uses FreeType (<a href="/js/FreeType-FTL.txt">licence</a>) and HarfBuzz
-              (<a href="/js/HarfBuzz-COPYING.txt">licence</a>). Portions of this software are copyright © 2024 The
-              FreeType Project (www.freetype.org). All rights reserved.</p>
+            <p class="credit">Шрифт, полученный из книги, распространяется по лицензии этой книги: преобразуйте его для чтения
+              на собственном устройстве. Преобразование использует FreeType (<a href="/js/FreeType-FTL.txt">лицензия</a>) и HarfBuzz
+              (<a href="/js/HarfBuzz-COPYING.txt">лицензия</a>). © 2024 The FreeType Project (www.freetype.org). Все права защищены.</p>
           </section>
 
           <section class="card" id="panel-upload" hidden>
-            <h2>Upload a font</h2>
-            <p class="card-intro">Font files already converted to <code>.cpfont</code>, on this computer.</p>
+            <h2>Загрузить шрифт</h2>
+            <p class="card-intro">Выберите на компьютере файлы шрифтов, уже преобразованные в формат <code>.cpfont</code>.</p>
             <form class="upload-form" id="uploadForm">
               <input type="file" id="fontFiles" accept=".cpfont" multiple required />
-              <button type="submit" class="btn btn-primary">Upload</button>
+              <button type="submit" class="btn btn-primary">Загрузить</button>
             </form>
             <p id="pickedInfo" class="family-meta"></p>
             <div id="status" role="status"></div>

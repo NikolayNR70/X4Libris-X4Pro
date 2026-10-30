@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8" />
@@ -17,34 +17,43 @@
       align-items: center;
       justify-content: center;
       padding: 32px 16px;
-      background: radial-gradient(circle at top, var(--accent-soft), transparent 45%), var(--bg);
+      background: linear-gradient(90deg, rgba(71, 63, 45, 0.025) 1px, transparent 1px),
+        linear-gradient(rgba(71, 63, 45, 0.025) 1px, transparent 1px), var(--bg);
+      background-size: 24px 24px;
     }
 
     .launch {
       width: min(100%, 400px);
       margin: 0;
-      padding: 32px 24px 24px;
+      padding: 30px 24px 24px;
       text-align: center;
       box-shadow: var(--shadow-raised);
+      border-color: var(--text-strong);
+      position: relative;
     }
 
-    .logo { font-size: 3.25rem; line-height: 1; margin-bottom: 14px; }
-    .launch h1 { font-size: 1.85rem; letter-spacing: -0.02em; margin: 0; overflow-wrap: anywhere; }
-    .subtitle { margin: 6px 0 0; color: var(--text-muted); }
-    .version { margin: 4px 0 0; font-size: 0.9rem; color: var(--accent-text); }
+    .launch::before { content: ""; position: absolute; inset: 8px; border: 1px solid var(--border); pointer-events: none; }
+    .logo { display: flex; justify-content: center; margin: 2px 0 12px; color: var(--accent); }
+    .logo .brand-mark { width: 100px; height: 60px; }
+    .launch h1 { font-size: 1.85rem; letter-spacing: 0.01em; margin: 0; overflow-wrap: anywhere; }
+    .subtitle { margin: 7px 0 0; color: var(--text-muted); }
+    .version { margin: 5px 0 0; font-size: 0.88rem; color: var(--accent-text); }
 
     .launch .nav-links { display: grid; gap: 10px; margin-top: 24px; }
     .launch .nav-links a {
       display: block;
       padding: 13px 16px;
-      border-radius: var(--radius-sm);
-      background: var(--accent-soft);
-      color: var(--accent-text);
+      border-radius: 3px;
+      border: 1px solid var(--control-border);
+      border-left: 4px solid var(--accent);
+      background: var(--surface);
+      color: var(--text-strong);
       text-decoration: none;
       font-weight: 600;
+      text-align: left;
       transition: background-color 0.15s, color 0.15s;
     }
-    .launch .nav-links a:hover { background: var(--accent); color: var(--on-accent); }
+    .launch .nav-links a:hover { background: var(--accent-soft); color: var(--text-strong); }
 
     .footer { margin: 20px 0 0; color: var(--text-muted); font-size: 0.85rem; }
   </style>
@@ -52,19 +61,21 @@
 
 <body>
   <main class="card launch">
-    <div class="logo" aria-hidden="true">📚</div>
+    <div class="logo" aria-hidden="true">
+      <!--#include file="shared/BrandMark.html.inc" -->
+    </div>
     <h1>%%CROSSPOINT%%</h1>
-    <p class="subtitle">Welcome to your reader</p>
+    <p class="subtitle">Веб-интерфейс электронной книги</p>
     <p class="version" id="version">&nbsp;</p>
     <!--#include file="shared/NavLinks.html.inc" -->
-    <p class="footer">Fast start page designed for weak connections</p>
+    <p class="footer">X4Libris · Xteink X4 Pro</p>
   </main>
   <script>
     // Asked for rather than built in: this page is served from the SD card bundle,
     // which a firmware update keeps when the pages themselves did not change.
     fetch('/api/status/fast')
       .then((r) => r.json())
-      .then((s) => { document.getElementById('version').textContent = 'Version ' + s.version; })
+      .then((s) => { document.getElementById('version').textContent = 'Версия ' + s.version; })
       .catch(() => {});
   </script>
 </body>

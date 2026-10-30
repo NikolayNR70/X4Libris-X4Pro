@@ -2,8 +2,12 @@
      the navigation bar and the colour mode switch. Styled by shared/Theme.css.inc and
      shared/NavLinks.css.inc. -->
 <header class="app-header">
+  <!--#include file="shared/RussianUi.js.inc" -->
   <div class="app-header-inner">
-    <a class="brand" href="/">📚 %%CROSSPOINT%%</a>
+    <a class="brand" href="/" aria-label="X4Libris — главная">
+      <img class="brand-mark" src="/js/x4libris-open-book.png" alt="" aria-hidden="true">
+      <span>X4Libris</span>
+    </a>
     <!--#include file="shared/NavLinks.html.inc" -->
     <button type="button" class="theme-toggle"></button>
     <script>
@@ -13,7 +17,7 @@
       (() => {
         const button = document.currentScript.previousElementSibling;
         const MODES = ['auto', 'light', 'dark'];
-        const NAMES = { auto: 'Automatic (as the system)', light: 'Light', dark: 'Dark' };
+        const NAMES = { auto: 'Автоматически (как в системе)', light: 'Светлая тема', dark: 'Тёмная тема' };
         const ICONS = {
           auto: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>',
           light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4' +
@@ -28,7 +32,7 @@
           else document.documentElement.dataset.theme = chosen;
           button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
             'stroke-linecap="round" aria-hidden="true">' + ICONS[chosen] + '</svg>';
-          button.title = 'Colour mode: ' + NAMES[chosen];
+          button.title = 'Цветовая тема: ' + NAMES[chosen];
           button.setAttribute('aria-label', button.title);
         };
         // Tracked here rather than re-read, so the switch still cycles where storage is blocked.

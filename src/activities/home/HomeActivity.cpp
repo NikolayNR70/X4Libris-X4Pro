@@ -239,7 +239,9 @@ std::vector<std::pair<int, int>> getSketchHomeCoverSizes(const GfxRenderer& rend
   const int recentH = std::max(0, menuStartY - cursorY - 6);
   const int tileH = recentBookCount > 1 ? recentH : 0;
   const int tileW = (innerW - 5) / 2;
-  const int recentCoverH = std::max(1, std::min(160, tileH - 2 * renderer.getLineHeight(UI_10_FONT_ID) - 16));
+  // Keep thumbnail generation in lockstep with renderSketchHome's three-line caption block;
+  // otherwise the renderer asks Storage for a size the loader never created and shows an empty slot.
+  const int recentCoverH = std::max(1, std::min(160, tileH - 3 * renderer.getLineHeight(UI_10_FONT_ID) - 20));
   const int recentCoverW = std::max(1, std::min({112, tileW - 16, recentCoverH * 7 / 10}));
   return {{112, 160}, {recentCoverW, recentCoverH}};
 }
@@ -1019,7 +1021,21 @@ void HomeActivity::renderSketchHome() {
                                  bitmap.getWidth() <= bitmap.getHeight() * 2 &&
                                  bitmap.getHeight() <= bitmap.getWidth() * 4;
         if (usableCover) {
-          renderer.drawBitmap(bitmap, rect.x, rect.y, rect.width, rect.height);
+          // Keep the source cover's aspect ratio and center it inside its slot. The thumbnail
+          // aspect can differ slightly from the 7:10 placeholder slot; drawing from rect.x made
+          // those covers look as if they had slipped to the left.
+          float fitScale = std::min(static_cast<float>(rect.width) / bitmap.getWidth(),
+                                    static_cast<float>(rect.height) / bitmap.getHeight());
+          // Match drawBitmap's existing no-upscale behavior for gray BMPs. Its 1-bit path keeps
+          // its own established scaling semantics, including the panel's downsample routine.
+          if (!bitmap.is1Bit()) fitScale = std::min(1.0f, fitScale);
+          const int fittedWidth = std::max(1, static_cast<int>(bitmap.getWidth() * fitScale));
+          const int fittedHeight = std::max(1, static_cast<int>(bitmap.getHeight() * fitScale));
+          const int drawX = rect.x + (rect.width - fittedWidth) / 2;
+          const int drawY = rect.y + (rect.height - fittedHeight) / 2;
+          // Keep the original target bounds so GfxRenderer follows the exact same bitmap path as
+          // before; only move the origin to center covers whose aspect differs from the slot.
+          renderer.drawBitmap(bitmap, drawX, drawY, rect.width, rect.height);
           drawn = true;
           if (path != requestedThumb) LOG_DBG("HOME", "Using cached cover fallback %s for %s", path.c_str(), book.path.c_str());
         }
@@ -1152,21 +1168,25 @@ void HomeActivity::renderSketchHome() {
     coverTargets.add(x, y, tileW, tileH, index);
     if (selectorIndex == index) fillSoftSelection(renderer, x, y, tileW, tileH);
     const int labelW = std::max(1, tileW - 8);
-    const auto title = wrappedTextToFit(renderer, UI_10_FONT_ID, recentBooks[index].title.c_str(), labelW, 2,
-                                         EpdFontFamily::REGULAR, 0.30f);
+    const auto title = wrappedTextToFit(renderer, UI_10_FONT_ID, recentBooks[index].title.c_str(), labelW, 3,
+                                         EpdFontFamily::REGULAR, 0.45f);
     const int captionLineHeight = std::max(1, renderer.getLineHeight(UI_10_FONT_ID));
     const int captionDrawLineHeight = std::max(1, static_cast<int>(std::ceil(captionLineHeight * title.scale)));
     const int captionHeight = captionDrawLineHeight * static_cast<int>(title.lines.size());
-    const int coverH = std::max(1, std::min(160, tileH - 2 * renderer.getLineHeight(UI_10_FONT_ID) - 16));
+    // Reserve equal three-line caption blocks for both columns. Longer titles can wrap fully,
+    // while the extra vertical inset protects the first/last glyph rows from the tile edge.
+    const int captionBlockHeight = 3 * captionLineHeight;
+    const int coverH = std::max(1, std::min(160, tileH - captionBlockHeight - 20));
     const int coverW = std::max(1, std::min({112, tileW - 16, coverH * 7 / 10}));
-    // Reserve the same two-line caption block for both columns. Otherwise a one-line title
+    // Reserve the same three-line caption block for both columns. Otherwise a one-line title
     // makes its cover group taller/shorter than the neighboring two-line title and the covers
     // visibly sit at different vertical positions.
-    const int groupHeight = coverH + 6 + 2 * captionLineHeight;
+    const int groupHeight = coverH + 8 + captionBlockHeight;
     const int groupY = y + std::max(0, (tileH - groupHeight) / 2);
     drawCover(recentBooks[index], Rect{x + (tileW - coverW) / 2, groupY, coverW, coverH}, coverW, coverH);
-    int labelY = groupY + coverH + 6;
-    renderer.fillRect(x + 2, labelY - 1, tileW - 4, captionHeight + 2, false);
+    const int captionTop = groupY + coverH + 8;
+    int labelY = captionTop + std::max(1, (captionBlockHeight - captionHeight) / 2);
+    renderer.fillRect(x + 2, captionTop, tileW - 4, captionBlockHeight, false);
     for (const auto& line : title.lines) {
       const int lineW = renderer.getTextWidthScaled(UI_10_FONT_ID, line.c_str(), EpdFontFamily::REGULAR,
                                                      title.scale);

@@ -28,7 +28,7 @@ CATALOG = os.path.join(PLUGINS, "catalog.json")
 # Copied from the manifest into the catalog entry, so the page can describe a plugin before
 # downloading it.
 MANIFEST_FIELDS = ("title", "description", "author", "version", "mount", "requires", "allowedHosts")
-CATALOG_NAME = "Witch Reader plugins"
+CATALOG_NAME = "X4Libris plugins"
 
 
 def is_external(entry: dict) -> bool:

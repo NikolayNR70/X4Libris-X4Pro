@@ -819,7 +819,9 @@ void list(Frame<MaxInteractions> &frame, Rect rect, const ListProps &props) {
       const bool fgWhite = fg.kind == PaintKind::Solid && fg.color == Color::White;
       const Paint paper = Paint::solid(fgWhite ? Color::Black : Color::White);
       if (props.toggleCheckbox) {
-        const int16_t size = static_cast<int16_t>((togW < togH ? togW : togH) - 6);
+        // A checkbox must remain easy to spot at the device's 480 px width. Keep it
+        // inside the existing toggle band, but use nearly the full band height.
+        const int16_t size = static_cast<int16_t>((togW < togH ? togW : togH) - 2);
         const Rect box{static_cast<int16_t>(toggleRect.right() - size - 3),
                        static_cast<int16_t>(toggleRect.y + (togH - size) / 2), size, size};
         frame.target().stroke(box, fg, 2, 2);

@@ -97,6 +97,19 @@ def get_git_remote_url(project_dir, remote_name):
 
 
 def get_git_repository(project_dir):
+    # A product build may deliberately keep OTA on its established feed while
+    # publishing the web bundle from a separate project release. Explicit
+    # project configuration takes precedence over the checkout's remote.
+    ini_path = os.path.join(project_dir, 'platformio.ini')
+    try:
+        config = configparser.ConfigParser()
+        config.read(ini_path, encoding='utf-8')
+        configured_repository = config.get('crosspoint', 'ota_repository', fallback='').strip('" ')
+        if configured_repository:
+            return configured_repository
+    except (OSError, configparser.Error) as e:
+        warn(f'could not read OTA repository from platformio.ini: {e}')
+
     # Other CI systems (Forgejo, Codeberg) may set GITHUB_REPOSITORY for compatibility
     # with GHA. We could also check for other CI-specific env vars to expand support
     # later, such as:
@@ -124,6 +137,18 @@ def get_git_repository(project_dir):
         'falling back to compile-time default.'
     )
     return None
+
+
+def get_web_repository(project_dir):
+    ini_path = os.path.join(project_dir, 'platformio.ini')
+    try:
+        config = configparser.ConfigParser()
+        config.read(ini_path, encoding='utf-8')
+        repository = config.get('crosspoint', 'web_repository', fallback='').strip('" ')
+        return repository or None
+    except (OSError, configparser.Error) as e:
+        warn(f'could not read web bundle repository from platformio.ini: {e}')
+        return None
 
 
 def get_display_sdk(project_dir):
@@ -275,6 +300,10 @@ def inject_version(env):
         print(f'CrossPoint Git repository: {git_repository}')
 
     scoped_defines = {}
+
+    web_repository = get_web_repository(project_dir)
+    if web_repository:
+        scoped_defines['WEB_BUNDLE_GIT_REPOSITORY'] = f'\\"{web_repository}\\"'
 
     # Which display/hardware SDK this firmware links against, for the System
     # Information screen. Injected for every environment (unlike the version).

@@ -332,7 +332,7 @@ class CssParser {
   // Phase-2 arena mode (see setIndexArena/setLeanResolve). When indexArena_ is set,
   // ensureCacheIndexLoaded() puts the ruleset in arena memory (not the heap vector) using
   // one of two layouts, decided by what fits — mirroring FreeInkBook's resident ruleset
-  // (libs/book/FreeInkBook/src/css/Css.cpp) as far as witchhunt's ~108 B CssStyle allows:
+  // (libs/book/FreeInkBook/src/css/Css.cpp) as far as the compact ~108 B CssStyle allows:
   //   - RESIDENT (preferred): a sorted {hash, styleOff} index at arenaResident_ plus a pool of
   //     DISTINCT styles at arenaStylePool_, each SPARSE-COMPRESSED (only the fields the CSS
   //     'defined' mask flags — a real rule sets 1-4 of 24 properties, vs ~108 B for the full

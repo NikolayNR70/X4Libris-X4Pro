@@ -1,30 +1,27 @@
-# X4Libris v1.0 — X4 Pro
+# X4Libris
 
-This repository freezes the X4Libris v1.0 trial build for Xteink X4 Pro and its working source snapshot.
+**X4Libris** — собственная прошивка для электронной книги **Xteink X4 Pro**. В этом репозитории находятся исходный код проекта, документация, веб-интерфейс и файлы выпуска.
 
-## Status
+## Скачать
 
-This is a **trial build**, not a physically validated release. It was compiled from the nearest preserved X4Pro source snapshot, which includes the EXT1 wake-cause classification change. The source snapshot is not a byte-for-byte reconstruction of the separately supplied PerfectInk firmware image. The image identifiers and ELF SHA-256 values differ; details are in [BUILD-REPRODUCIBILITY.md](BUILD-REPRODUCIBILITY.md).
+- [X4Libris v1.0 — страница выпуска](https://github.com/NikolayNR70/X4Libris-X4Pro/releases/tag/X4Libris-v1.0)
+- В выпуске находятся образ прошивки, совместимый пакет веб-интерфейса и контрольные суммы.
 
-The published app image is in `artifacts/X4Libris-X4Pro-v1.0.bin`.
+## Возможности
 
-- SHA-256: `1157856C029773BED9FA835591EDA7A0ABADA40B49393C20086C9BF58724EC01`
-- Size: 5,491,200 bytes
-- Target: ESP32-S3 / Xteink X4 Pro (`x4pro_gh_release`)
-- Build: PlatformIO Core 6.2.0, Python 3.13; RAM 110,152/327,680 bytes; application flash 5,486,185/6,553,600 bytes.
-- esptool 5.3.0 validated the ESP32-S3 image checksum and validation hash.
-- No physical-device or QEMU verification is claimed.
+- Чтение EPUB, FB2, FB2.zip/FBZ, XTC/XTCH, TXT и Markdown.
+- Прямое использование шрифтов TTF и OTF с карты памяти.
+- Библиотека, обложки, недавние книги, поиск и закладки.
+- Синхронизация KOReader и каталоги OPDS.
+- Календарь, «Сегодня», статистика чтения и погода.
+- Русскоязычный веб-интерфейс для управления книгами, настройками и шрифтами.
 
-## Build
+[Полное описание возможностей](FUNCTIONALITY-RU.md) · [Установка веб-интерфейса](docs/web-interface-ru.md) · [Сборка прошивки](BUILD-REPRODUCIBILITY.md)
 
-Use Python 3.13 and PlatformIO Core. From the repository root:
+## Сборка
+
+Требуются PlatformIO Core и Python 3.13. Из папки репозитория выполните:
 
 ```powershell
 py -3.13 -m platformio run -e x4pro_gh_release
 ```
-
-The source tree is a recovered working snapshot. A clean clone may generate a different web bundle identifier because the original build had no Git metadata and Terser was unavailable. Do not treat a fresh build as byte-identical without comparing the resulting image and ELF hashes.
-
-## Provenance
-
-The upstream project lineage and license are preserved in `LICENSE`, `CHANGELOG-NRE.txt`, and `docs/`. X4Libris v1.0 is the product/version label assigned to this trial snapshot. No GitHub Actions workflows are included in this repository snapshot.

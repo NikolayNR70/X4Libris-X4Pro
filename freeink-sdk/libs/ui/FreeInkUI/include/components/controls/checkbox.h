@@ -14,10 +14,10 @@ struct CheckboxProps {
   TextStyle text{};
   StyleSet styles{};
   State state = StateNormal;
-  int16_t boxSize = 18;
+  int16_t boxSize = 22;
   int16_t sidePadding = 8;
   int16_t gap = 8;
-  int16_t minTouchSize = 44;
+  int16_t minTouchSize = 56;
   uint8_t radius = 0;
   bool enabled = true;
 };
@@ -43,13 +43,17 @@ void checkbox(Frame<MaxInteractions>& frame, Rect rect, const CheckboxProps& pro
                         style.borderWidth ? style.borderWidth : 1, style.radius, style.corners);
   if (props.checked) {
     const Paint ink = style.foreground.kind == PaintKind::None ? Paint::solid(Color::Black) : style.foreground;
-    frame.target().line(Point{static_cast<int16_t>(boxRect.x + 3), static_cast<int16_t>(boxRect.y + box / 2)},
+    const int16_t markStroke = box >= 20 ? 3 : 2;
+    frame.target().line(Point{static_cast<int16_t>(boxRect.x + box / 6),
+                              static_cast<int16_t>(boxRect.y + box / 2)},
                         Point{static_cast<int16_t>(boxRect.x + box / 2 - 1),
                               static_cast<int16_t>(boxRect.bottom() - 4)},
-                        2, ink);
+                        markStroke, ink);
     frame.target().line(Point{static_cast<int16_t>(boxRect.x + box / 2 - 1),
                               static_cast<int16_t>(boxRect.bottom() - 4)},
-                        Point{static_cast<int16_t>(boxRect.right() - 3), static_cast<int16_t>(boxRect.y + 4)}, 2,
+                        Point{static_cast<int16_t>(boxRect.right() - box / 6),
+                              static_cast<int16_t>(boxRect.y + box / 6)},
+                        markStroke,
                         ink);
   }
   if (props.label) {

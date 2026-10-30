@@ -20,6 +20,10 @@
 #define WEB_BUNDLE_RELEASE_TAG ""
 #endif
 
+#ifndef WEB_BUNDLE_GIT_REPOSITORY
+#define WEB_BUNDLE_GIT_REPOSITORY CROSSPOINT_GIT_REPOSITORY
+#endif
+
 namespace WebAssets {
 namespace {
 
@@ -234,7 +238,7 @@ bool serveScript(WebServer& server, const char* name) {
 
 const char* releaseTag() { return WEB_BUNDLE_RELEASE_TAG; }
 
-const char* repository() { return CROSSPOINT_GIT_REPOSITORY; }
+const char* repository() { return WEB_BUNDLE_GIT_REPOSITORY; }
 
 const char* assetName() { return web_bundle::ASSET_NAME; }
 

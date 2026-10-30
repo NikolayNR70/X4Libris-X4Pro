@@ -54,9 +54,9 @@ PAGES = {
 }
 # Where /js/<name> looks after src/network/html/js: the files build_html.py takes from elsewhere
 # (EXTERNAL_ASSETS there), here served straight from their folders.
-EXTRA_JS_DIRS = [os.path.join(ROOT, d) for d in ("tools/ftwasm/dist", "tools/ftwasm/js", "tools/ftwasm/dist/licenses")]
+EXTRA_JS_DIRS = [os.path.join(ROOT, d) for d in ("tools/ftwasm/dist", "tools/ftwasm/js", "tools/ftwasm/dist/licenses", "assets/web")]
 CONTENT_TYPES = {".wasm": "application/wasm", ".mjs": "application/javascript", ".js": "application/javascript",
-                 ".txt": "text/plain; charset=utf-8"}
+                 ".txt": "text/plain; charset=utf-8", ".png": "image/png"}
 INCLUDE_RE = re.compile(r'<!--\s*#include\s+file="([^"]+)"\s*-->')
 # A 1x1 transparent GIF, the answer to the ?shot= delay image.
 PIXEL = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
@@ -65,7 +65,7 @@ HOP_BY_HOP = {"connection", "keep-alive", "transfer-encoding", "te", "trailer", 
 
 
 def firmware_name_and_version() -> tuple:
-    name, version = "Witch Reader", "dev"
+    name, version = "X4Libris", "1.0"
     section = None
     with open(os.path.join(ROOT, "platformio.ini"), encoding="utf-8") as f:
         for line in f:

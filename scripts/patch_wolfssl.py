@@ -1,5 +1,5 @@
 """
-PlatformIO pre-build hook: inject WitchReader's trimmed wolfSSL configuration.
+PlatformIO pre-build hook: inject the trimmed wolfSSL configuration used by this firmware.
 
 The wolfSSL Arduino library ships a user_settings.h tuned for a broad default.
 For this firmware we want a lean CLIENT-ONLY TLS 1.3/1.2 profile to save flash

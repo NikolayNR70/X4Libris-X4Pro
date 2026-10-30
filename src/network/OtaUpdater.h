@@ -5,7 +5,7 @@
 #include <string>
 
 #ifndef CROSSPOINT_GIT_REPOSITORY
-#define CROSSPOINT_GIT_REPOSITORY "jpirnay/witchhunt-reader"
+#define CROSSPOINT_GIT_REPOSITORY "NikolayNR70/X4Libris-X4Pro"
 #endif
 
 class OtaUpdater {

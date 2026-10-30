@@ -24,6 +24,7 @@ FLASH_ASSETS = {"WebSetupPage.html"}
 # the licences that must ship with it. Bundled as they are, gzipped, never minified. Paths are
 # relative to the project; the name is the one under /js/.
 EXTERNAL_ASSETS = [
+    ("x4libris-open-book.png", "assets/web/x4libris-open-book.png", "image/png"),
     ("ftwasm.wasm", "tools/ftwasm/dist/ftwasm.wasm", "application/wasm"),
     ("ftwasm.mjs", "tools/ftwasm/dist/ftwasm.mjs", "application/javascript"),
     ("cpfont-raster.mjs", "tools/ftwasm/js/cpfont-raster.mjs", "application/javascript"),
@@ -85,10 +86,10 @@ def get_base_version(project_dir: str) -> (str, str):
     ini_path = os.path.join(project_dir, "platformio.ini")
     if not os.path.isfile(ini_path):
         warn(f"platformio.ini not found at {ini_path}; using 0.0.0")
-        return "CrossPoint Reader", "0.0.0"
+        return "X4Libris", "0.0.0"
     config = configparser.ConfigParser()
     config.read(ini_path)
-    base_name = config.get("crosspoint", "name", fallback="CrossPoint Reader")
+    base_name = config.get("crosspoint", "name", fallback="X4Libris")
     base_name = base_name.strip('"')
     if not config.has_option("crosspoint", "version"):
         warn("No [crosspoint] section or version in platformio.ini; using 0.0.0")
@@ -127,13 +128,13 @@ def get_git_branch(project_dir: str) -> str:
         return "unknown"
 
 
-def get_version_string(project_dir: str) -> (str, str):
+def get_version_string(project_dir: str, pioenv: str | None = None) -> (str, str):
     env_name = os.environ.get("CROSSPOINT_NAME")
     env_version = os.environ.get("CROSSPOINT_VERSION")
     if env_version:
         return env_name.strip('"'), env_version.strip('"')
     base_name, base_version = get_base_version(project_dir)
-    pioenv = os.environ.get("PIOENV", "default")
+    pioenv = pioenv or os.environ.get("PIOENV", "default")
     if pioenv == "default":
         branch = get_git_branch(project_dir)
         return base_name, f"{base_version}-dev+{branch}"
@@ -393,7 +394,10 @@ def get_release_tag(pioenv: str, base_version: str) -> str:
     if pioenv.endswith("gh_release_rc"):
         return os.environ.get("CROSSPOINT_RC_VERSION", "")
     if pioenv.endswith("gh_release"):
-        return base_version
+        ini_path = os.path.join(get_project_dir(), "platformio.ini")
+        config = configparser.ConfigParser()
+        config.read(ini_path, encoding="utf-8")
+        return config.get("crosspoint", "web_release_tag", fallback=base_version).strip('" ')
     return ""
 
 
@@ -477,7 +481,9 @@ def write_bundle(entries: list, out_dir: str) -> None:
 
 project_dir = get_project_dir()
 scons_env = get_scons_env()
-name_string, version_string = get_version_string(project_dir)
+name_string, version_string = get_version_string(
+    project_dir, scons_env["PIOENV"] if scons_env is not None else None
+)
 print (f"Building HTML/JS assets for {name_string} version {version_string}")
 PLACEHOLDERS["%%CROSSPOINT%%"] = name_string
 PLACEHOLDERS["%%VERSION%%"] = version_string

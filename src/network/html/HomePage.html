@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!--#include file="shared/ThemeInit.html.inc" -->
-  <title>System Info - %%CROSSPOINT%%</title>
+  <title>Сведения о системе — X4Libris</title>
   <style>
     <!--#include file="shared/Theme.css.inc" -->
     <!--#include file="shared/NavLinks.css.inc" -->
@@ -30,54 +30,54 @@
 
   <main class="page">
     <div class="page-head">
-      <h1>System Info</h1>
-      <p class="page-intro">What the reader reports about itself.</p>
+      <h1>Сведения о системе</h1>
+      <p class="page-intro">Сведения о состоянии устройства.</p>
     </div>
 
     <div class="info-grid">
       <section class="card">
-        <h2>Version</h2>
-        <div class="info-row"><span class="label">Firmware</span><span class="value" id="version">Loading...</span></div>
-        <div class="info-row"><span class="label">Device</span><span class="value" id="device">Loading...</span></div>
+        <h2>Версия</h2>
+        <div class="info-row"><span class="label">Прошивка</span><span class="value" id="version">Загрузка…</span></div>
+        <div class="info-row"><span class="label">Устройство</span><span class="value" id="device">Загрузка…</span></div>
       </section>
 
       <section class="card">
-        <h2>Network</h2>
-        <div class="info-row"><span class="label">Wi-Fi</span><span class="value" id="wifi-status">Loading...</span></div>
-        <div class="info-row"><span class="label">IP address</span><span class="value" id="ip-address">Loading...</span></div>
-        <div class="info-row"><span class="label">MAC address</span><span class="value" id="mac-address">Loading...</span></div>
+        <h2>Сеть</h2>
+        <div class="info-row"><span class="label">Wi-Fi</span><span class="value" id="wifi-status">Загрузка…</span></div>
+        <div class="info-row"><span class="label">IP-адрес</span><span class="value" id="ip-address">Загрузка…</span></div>
+        <div class="info-row"><span class="label">MAC-адрес</span><span class="value" id="mac-address">Загрузка…</span></div>
       </section>
 
       <section class="card">
-        <h2>Runtime</h2>
-        <div class="info-row"><span class="label">Uptime</span><span class="value" id="uptime">Loading...</span></div>
-        <div class="info-row"><span class="label">Battery</span><span class="value" id="battery">Loading...</span></div>
+        <h2>Работа устройства</h2>
+        <div class="info-row"><span class="label">Время работы</span><span class="value" id="uptime">Загрузка…</span></div>
+        <div class="info-row"><span class="label">Батарея</span><span class="value" id="battery">Загрузка…</span></div>
       </section>
 
       <section class="card">
-        <h2>Storage</h2>
-        <div class="info-row"><span class="label">SD card</span><span class="value" id="sd-space">Not loaded</span></div>
-        <div class="action-row"><button type="button" class="btn btn-small" id="load-sd-button">Load SD info</button></div>
+        <h2>Хранилище</h2>
+        <div class="info-row"><span class="label">Карта SD</span><span class="value" id="sd-space">Не загружено</span></div>
+        <div class="action-row"><button type="button" class="btn btn-small" id="load-sd-button">Загрузить сведения о карте SD</button></div>
       </section>
 
       <section class="card">
-        <h2>Chip</h2>
-        <div class="info-row"><span class="label">Chip</span><span class="value" id="chip-version">Loading...</span></div>
-        <div class="info-row"><span class="label">CPU</span><span class="value" id="cpu-mhz">Loading...</span></div>
+        <h2>Процессор</h2>
+        <div class="info-row"><span class="label">Чип</span><span class="value" id="chip-version">Загрузка…</span></div>
+        <div class="info-row"><span class="label">Процессор</span><span class="value" id="cpu-mhz">Загрузка…</span></div>
       </section>
 
       <section class="card">
-        <h2>Memory and flash</h2>
-        <div class="info-row"><span class="label">Heap free / min / max</span><span class="value" id="heap-combined">Loading...</span></div>
-        <div class="info-row"><span class="label">App partition</span><span class="value" id="app-partition-size">Loading...</span></div>
-        <div class="info-row"><span class="label">Total flash</span><span class="value" id="flash-total">Loading...</span></div>
+        <h2>Память и флеш-память</h2>
+        <div class="info-row"><span class="label">Свободная память / минимум / максимум</span><span class="value" id="heap-combined">Загрузка…</span></div>
+        <div class="info-row"><span class="label">Раздел приложения</span><span class="value" id="app-partition-size">Загрузка…</span></div>
+        <div class="info-row"><span class="label">Объём флеш-памяти</span><span class="value" id="flash-total">Загрузка…</span></div>
       </section>
     </div>
 
     <div class="card report">
-      <p>Reporting a problem? Diagnostics shows how the reader last slept and started, and saves a report to attach
-        to the issue.</p>
-      <a class="btn" href="/diagnostics">Open Diagnostics</a>
+      <p>Сообщаете о проблеме? В разделе «Диагностика» показана история сна и запусков устройства. Там же можно скачать отчёт
+        и приложить его к сообщению об ошибке.</p>
+      <a class="btn" href="/diagnostics">Открыть диагностику</a>
     </div>
 
     <div class="debug-footer">
@@ -111,7 +111,7 @@
     const SD_LABELS = {
       NOT_LOADED: 'Not loaded',
       LOAD_BUTTON: 'Load SD info',
-      LOADING: 'Loading...',
+      LOADING: 'Загрузка…',
       ERROR: 'Error loading'
     };
 
@@ -198,7 +198,7 @@
       button.disabled = true;
       button.textContent = SD_LABELS.LOADING;
       document.getElementById('sd-space').textContent = SD_LABELS.LOADING;
-      document.getElementById('full-status-duration').textContent = 'Loading...';
+      document.getElementById('full-status-duration').textContent = 'Загрузка…';
 
       const start = performance.now();
 

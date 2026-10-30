@@ -6,17 +6,17 @@
    aliases so page-specific rules written against them keep working. */
 :root {
   --font-stack: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
-  --bg: #f3f5f4;
-  --surface: #ffffff;
-  --surface-2: #f6f8f7;
-  --text: #28302c;
-  --text-strong: #17211c;
-  --text-muted: #66716b;
-  --border: #e1e6e3;
-  --accent: #4d7d64;
-  --accent-hover: #3f6a54;
-  --accent-soft: #e5efe9;
-  --accent-text: #3c6d54;
+  --bg: #f1eee5;
+  --surface: #fbf9f2;
+  --surface-2: #ece9df;
+  --text: #282a25;
+  --text-strong: #171a17;
+  --text-muted: #65675f;
+  --border: #c9c4b7;
+  --accent: #252522;
+  --accent-hover: #10100f;
+  --accent-soft: #e6e4dc;
+  --accent-text: #252522;
   --on-accent: #ffffff;
   --danger: #b2402d;
   --danger-hover: #943423;
@@ -25,14 +25,14 @@
   --warn-border: #ecd08a;
   --warn-text: #5f4b00;
   --ok-text: #2c7a4e;
-  --control-bg: #ffffff;
-  --control-border: #cfd6d2;
-  --switch-off: #c4ccc8;
-  --focus-ring: 0 0 0 3px rgba(77, 125, 100, 0.35);
-  --shadow: 0 1px 2px rgba(16, 24, 20, 0.06), 0 1px 3px rgba(16, 24, 20, 0.08);
-  --shadow-raised: 0 4px 16px rgba(16, 24, 20, 0.14);
-  --radius: 10px;
-  --radius-sm: 6px;
+  --control-bg: #fffdf8;
+  --control-border: #aaa698;
+  --switch-off: #c7c3b8;
+  --focus-ring: 0 0 0 3px rgba(37, 37, 34, 0.22);
+  --shadow: 0 1px 2px rgba(32, 30, 24, 0.07);
+  --shadow-raised: 0 5px 18px rgba(32, 30, 24, 0.12);
+  --radius: 4px;
+  --radius-sm: 3px;
 
   --font-color: var(--text);
   --title-color: var(--text-strong);
@@ -54,17 +54,18 @@
    two blocks hold the same values; CSS has no way to share them. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #171a19;
-    --surface: #222725;
-    --surface-2: #2a302d;
-    --text: #e3e8e5;
-    --text-strong: #f3f6f4;
-    --text-muted: #9fa9a4;
-    --border: #353c38;
-    --accent: #4d7d64;
-    --accent-hover: #5b8f74;
-    --accent-soft: #263a30;
-    --accent-text: #8fc4a7;
+    --bg: #1c1c19;
+    --surface: #272722;
+    --surface-2: #303029;
+    --text: #e8e5da;
+    --text-strong: #f7f4e9;
+    --text-muted: #b2afa3;
+    --border: #504f45;
+    --accent: #d8d6ce;
+    --accent-hover: #f1efe8;
+    --accent-soft: #393934;
+    --accent-text: #e6e4dc;
+    --on-accent: #191917;
     --danger: #d0604c;
     --danger-hover: #e0705c;
     --danger-soft: #3a2420;
@@ -72,26 +73,27 @@
     --warn-border: #6b5a22;
     --warn-text: #ecd690;
     --ok-text: #8fd4aa;
-    --control-bg: #1c201e;
-    --control-border: #46504b;
-    --switch-off: #4a534f;
+    --control-bg: #22221e;
+    --control-border: #5b5a50;
+    --switch-off: #5b5a50;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-raised: 0 4px 18px rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #171a19;
-  --surface: #222725;
-  --surface-2: #2a302d;
-  --text: #e3e8e5;
-  --text-strong: #f3f6f4;
-  --text-muted: #9fa9a4;
-  --border: #353c38;
-  --accent: #4d7d64;
-  --accent-hover: #5b8f74;
-  --accent-soft: #263a30;
-  --accent-text: #8fc4a7;
+  --bg: #1c1c19;
+  --surface: #272722;
+  --surface-2: #303029;
+  --text: #e8e5da;
+  --text-strong: #f7f4e9;
+  --text-muted: #b2afa3;
+  --border: #504f45;
+  --accent: #d8d6ce;
+  --accent-hover: #f1efe8;
+  --accent-soft: #393934;
+  --accent-text: #e6e4dc;
+  --on-accent: #191917;
   --danger: #d0604c;
   --danger-hover: #e0705c;
   --danger-soft: #3a2420;
@@ -99,9 +101,9 @@
   --warn-border: #6b5a22;
   --warn-text: #ecd690;
   --ok-text: #8fd4aa;
-  --control-bg: #1c201e;
-  --control-border: #46504b;
-  --switch-off: #4a534f;
+  --control-bg: #22221e;
+  --control-border: #5b5a50;
+  --switch-off: #5b5a50;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-raised: 0 4px 18px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
@@ -135,6 +137,7 @@ a { color: var(--accent-text); }
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 -2px 0 var(--accent-soft);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -149,12 +152,22 @@ a { color: var(--accent-text); }
   min-height: 56px;
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-weight: 700;
   font-size: 1.05rem;
   color: var(--text-strong);
   text-decoration: none;
   white-space: nowrap;
 }
+.brand-mark { width: 27px; height: 27px; flex: none; color: var(--accent); object-fit: contain; }
+.brand-mark[src^="data:image/png"] { filter: none; }
+:root[data-theme="dark"] .brand-mark[src^="data:image/png"] { filter: invert(1); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-mark[src^="data:image/png"] { filter: invert(1); }
+}
+.brand span { letter-spacing: 0.015em; }
 /* One width for the header and every page, so their left edges line up. Text-heavy content can sit
    in .page-narrow, which keeps that left edge but limits the line length. */
 .theme-toggle {
@@ -183,7 +196,7 @@ a { color: var(--accent-text); }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: inset 3px 0 0 var(--accent-soft), var(--shadow);
   padding: 20px;
   margin: 0 0 16px;
 }

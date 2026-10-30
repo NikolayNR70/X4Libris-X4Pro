@@ -9,7 +9,7 @@
 #include "util/FontCatalog.h"
 
 #ifndef FONT_MANIFEST_URL
-#define FONT_MANIFEST_URL "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/fonts.json"
+#define FONT_MANIFEST_URL "https://raw.githubusercontent.com/NikolayNR70/X4Libris-X4Pro/main/assets/sd-fonts/fonts.json"
 #endif
 
 // Adapted from upstream crosspoint-reader's FontDownloadActivity

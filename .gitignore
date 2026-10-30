@@ -66,6 +66,9 @@ src/idf_component.yml
 # Compiled Russian help is published as a release asset.
 /docs/nre-help-ru/*.chm
 
+# Local review packages; release assets are attached through GitHub after approval.
+/artifacts/review/
+
 /.cache*/
 /node_modules/
 

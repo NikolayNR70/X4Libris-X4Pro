@@ -763,7 +763,6 @@ class CrossPointSettings {
   uint8_t showFileTransferOnHome = 1;
   uint8_t showWeatherOnHome = 1;
   // Include release candidate builds when checking for OTA updates.
-  uint8_t includeBetaUpdates = 0;
   // Accept any TLS certificate on https requests (1 = skip validation).
   //
   // For self-hosted servers with a private CA or a self-signed certificate —

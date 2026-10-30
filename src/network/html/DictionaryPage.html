@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--#include file="shared/ThemeInit.html.inc" -->
-    <title>Dictionaries - %%CROSSPOINT%%</title>
+  <title>Словари — X4Libris</title>
     <script src="/js/jszip.min.js"></script>
     <style>
       <!--#include file="shared/Theme.css.inc" -->
@@ -107,32 +107,30 @@
 
     <main class="page page-narrow">
       <div class="page-head">
-        <h1>Dictionaries</h1>
-        <p class="page-intro">StarDict dictionaries for looking words up while you read.</p>
+        <h1>Словари</h1>
+        <p class="page-intro">Словари StarDict для поиска слов во время чтения.</p>
       </div>
 
       <section class="card">
-        <h2>Installed dictionaries</h2>
-        <p class="hint">Choose the one to look words up in on the reader: Settings → Reader → Dictionary.</p>
-        <div id="installed"><p class="empty">Loading...</p></div>
+        <h2>Установленные словари</h2>
+        <p class="hint">Выберите словарь на устройстве: Настройки → Чтение → Словарь.</p>
+        <div id="installed"><p class="empty">Загрузка…</p></div>
       </section>
 
       <section class="card">
-        <h2>Install a dictionary</h2>
+        <h2>Установить словарь</h2>
         <p class="notice">
-          StarDict dictionaries only. Choose the archive you downloaded (.zip, .tar.gz, .tgz, .tar.bz2 or .tar)
-          or the dictionary's own files (.ifo, .idx or .idx.gz, .dict or .dict.dz, and an optional .syn).
-          Compressed parts are unpacked here in your browser, so the reader gets files it can use.
-          <a href="https://github.com/jpirnay/witchhunt-reader/blob/master/docs/dictionary.md#where-to-find-dictionaries"
-            target="_blank" rel="noopener">Where to find dictionaries</a>
+          Поддерживаются словари StarDict. Выберите архив (.zip, .tar.gz, .tgz, .tar.bz2 или .tar)
+          либо файлы словаря (.ifo, .idx или .idx.gz, .dict или .dict.dz и необязательный .syn).
+          Архив будет распакован в браузере перед передачей на устройство. Используйте словари StarDict только из надёжных источников.
         </p>
         <div class="drop-zone" id="dropZone">
           <input type="file" id="dictFiles" multiple />
-          <p>or drop the files here</p>
+          <p>или перетащите файлы сюда</p>
         </div>
         <fieldset id="found"></fieldset>
         <div class="toolbar" id="installBar" hidden>
-          <button id="installBtn" class="btn btn-primary" type="button">Install</button>
+          <button id="installBtn" class="btn btn-primary" type="button">Установить</button>
           <span class="meta" id="installTotal"></span>
         </div>
         <div class="progress" id="progress" hidden>

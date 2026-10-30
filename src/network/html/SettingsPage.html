@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!--#include file="shared/ThemeInit.html.inc" -->
-  <title>Settings - %%CROSSPOINT%%</title>
+  <title>Настройки — X4Libris</title>
   <style>
     <!--#include file="shared/Theme.css.inc" -->
     <!--#include file="shared/NavLinks.css.inc" -->
@@ -113,8 +113,8 @@
 
   <main class="page">
     <div class="page-head">
-      <h1>Settings</h1>
-      <p class="page-intro">Changes reach the reader when you save them.</p>
+      <h1>Настройки</h1>
+      <p class="page-intro">Изменения применяются на устройстве после сохранения.</p>
     </div>
 
     <div class="side-layout">
@@ -123,7 +123,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line>
           </svg>
-          <input type="search" id="search" placeholder="Search settings" aria-label="Search settings" autocomplete="off">
+          <input type="search" id="search" placeholder="Поиск по настройкам" aria-label="Поиск по настройкам" autocomplete="off">
         </div>
         <nav id="categoryNav" aria-label="Settings categories"></nav>
       </aside>
@@ -133,16 +133,16 @@
 
         <section class="panel hidden" id="panel-wifi" data-title="Wi-Fi networks">
           <div class="panel-head">
-            <h2>Wi-Fi networks</h2>
-            <p>Networks the reader joins on its own. Passwords are never shown, only replaced or cleared.</p>
+            <h2>Сети Wi-Fi</h2>
+            <p>Сети, к которым устройство подключается автоматически. Пароли скрыты: их можно заменить или удалить.</p>
           </div>
           <div class="card" id="wifiList"></div>
         </section>
 
         <section class="panel hidden" id="panel-opds" data-title="OPDS servers">
           <div class="panel-head">
-            <h2>OPDS servers</h2>
-            <p>Online catalogs the reader can browse and download books from.</p>
+            <h2>Серверы OPDS</h2>
+            <p>Онлайн-каталоги, в которых можно искать и скачивать книги.</p>
           </div>
           <div id="opdsDownloads"></div>
           <div class="card" id="opdsList"></div>
@@ -150,23 +150,23 @@
 
         <section class="panel hidden" id="panel-plugins" data-title="Plugins">
           <div class="panel-head">
-            <h2>Plugins</h2>
-            <p>Settings that installed plugins add to this page. Install, switch off or remove plugins on the
-              <a href="/plugins">Plugins</a> page.</p>
+            <h2>Плагины</h2>
+            <p>Установленные плагины могут добавлять сюда свои параметры. Управляйте ими на странице
+              <a href="/plugins">«Плагины»</a>.</p>
           </div>
           <div id="plugin-container"></div>
-          <p class="empty card hidden" id="pluginsEmpty">No installed plugin adds settings here.</p>
+          <p class="empty card hidden" id="pluginsEmpty">Установленные плагины не добавляют сюда параметры.</p>
         </section>
       </div>
     </div>
   </main>
 
-  <div class="save-bar" id="saveBar" role="region" aria-label="Unsaved changes">
+  <div class="save-bar" id="saveBar" role="region" aria-label="Несохранённые изменения">
     <div class="save-bar-inner">
       <span id="saveSummary"></span>
       <div class="save-bar-actions">
-        <button type="button" class="btn" id="discardBtn">Discard</button>
-        <button type="button" class="btn btn-primary" id="saveBtn">Save changes</button>
+        <button type="button" class="btn" id="discardBtn">Отменить</button>
+        <button type="button" class="btn btn-primary" id="saveBtn">Сохранить изменения</button>
       </div>
     </div>
   </div>
@@ -188,6 +188,8 @@
   let current = '';       // id of the panel shown
 
   const $ = (id) => document.getElementById(id);
+  const ruLabel = (value) => (window.x4librisWebRuText && window.x4librisWebRuText[value]) ||
+    (window.x4librisFirmwareRu ? window.x4librisFirmwareRu(value || '') : (value || ''));
 
   // Builds an element: el('div', {className: 'x', onclick: f}, [children or strings]).
   function el(tag, props, children) {
@@ -220,6 +222,13 @@
     return '';
   }
 
+  function lookupLocalized(map, name) {
+    const direct = lookup(map, name);
+    if (direct) return direct;
+    if (!window.x4librisFirmwareEn || !name) return '';
+    return lookup(map, window.x4librisFirmwareEn(name));
+  }
+
   function slug(name, index) {
     const s = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     return s || 'category-' + (index + 1);
@@ -233,11 +242,11 @@
   function passwordField(id, isSet, label) {
     const input = el('input', {
       type: 'password', id, value: '', autocomplete: 'new-password',
-      placeholder: isSet ? 'Unchanged - type to replace' : 'Not set', 'aria-label': label
+      placeholder: isSet ? 'Не изменён — введите новый пароль для замены' : 'Не задан', 'aria-label': label
     });
     if (!isSet) return [input];
     return [input, el('label', { className: 'clear-cred' }, [
-      el('input', { type: 'checkbox', id: id + '-clear' }), 'Clear the stored password'])];
+      el('input', { type: 'checkbox', id: id + '-clear' }), 'Удалить сохранённый пароль'])];
   }
 
   // undefined: keep what is stored; '': clear it; anything else: the new password.
@@ -263,11 +272,11 @@
     if (s.type === 'enum' && useSegmented(s)) {
       return el('div', { className: 'segmented', role: 'radiogroup', id, 'aria-labelledby': id + '-name' },
         s.options.map((opt, i) => el('label', {}, [
-          el('input', { type: 'radio', name: id, value: String(i), checked: i === s.value }), el('span', { textContent: opt })])));
+          el('input', { type: 'radio', name: id, value: String(i), checked: i === s.value }), el('span', { textContent: ruLabel(opt) })])));
     }
     if (s.type === 'enum') {
       return el('select', { id }, s.options.map((opt, i) =>
-        el('option', { value: String(i), selected: i === s.value, textContent: opt })));
+        el('option', { value: String(i), selected: i === s.value, textContent: ruLabel(opt) })));
     }
     if (s.type === 'value') {
       return el('input', { type: 'number', id, value: String(s.value), min: s.min, max: s.max, step: s.step });
@@ -302,11 +311,15 @@
   function settingRow(s, category, section, group) {
     const id = 'set-' + s.key;
     const help = SETTINGS_HELP.settings[s.key] || '';
+    const name = ruLabel(s.name);
+    section = ruLabel(section);
+    group = ruLabel(group);
+    category = ruLabel(category);
     const control = controlFor(s);
     const isGroup = s.type === 'enum' && useSegmented(s);
     const nameEl = isGroup
-      ? el('span', { className: 'setting-name', id: id + '-name', textContent: s.name })
-      : el('label', { className: 'setting-name', id: id + '-name', for: id, textContent: s.name });
+      ? el('span', { className: 'setting-name', id: id + '-name', textContent: name })
+      : el('label', { className: 'setting-name', id: id + '-name', for: id, textContent: name });
     const row = el('div', {
       className: 'setting' + (s.type === 'toggle' ? ' is-switch' : ''),
       dataset: { key: s.key, search: [s.name, help, section, group, category].join(' ').toLowerCase() }
@@ -330,7 +343,8 @@
     let card = null, rows = null, groupName = '', sectionName = '';
     const newCard = (title) => {
       sectionName = title || '';
-      const sectionHelp = lookup(SETTINGS_HELP.sections, title);
+      title = ruLabel(title);
+      const sectionHelp = lookupLocalized(SETTINGS_HELP.sections, title);
       card = el('div', { className: 'card settings-section' }, [
         title ? el('h3', { textContent: title }) : null,
         sectionHelp ? el('p', { className: 'section-help', textContent: sectionHelp }) : null]);
@@ -340,7 +354,7 @@
     };
     for (const s of cat.rows) {
       if (!card || s.subcategory) newCard(s.subcategory);
-      const submenu = s.submenu || '';
+      const submenu = ruLabel(s.submenu || '');
       if (!rows || submenu !== groupName) {
         groupName = submenu;
         if (submenu && submenu !== sectionName) card.append(el('div', { className: 'group-title', textContent: submenu }));
@@ -355,15 +369,17 @@
   function renderSettings() {
     const host = $('settingsPanels');
     host.replaceChildren(...categories.map((cat) => {
-      const intro = lookup(SETTINGS_HELP.categories, cat.name);
-      return el('section', { className: 'panel hidden', id: 'panel-' + cat.id, dataset: { title: cat.name } }, [
-        el('div', { className: 'panel-head' }, [el('h2', { textContent: cat.name }), intro ? el('p', { textContent: intro }) : null]),
-        ...sectionCards(cat)]);
+      const categoryName = ruLabel(cat.name);
+      const intro = lookupLocalized(SETTINGS_HELP.categories, categoryName) || lookup(SETTINGS_HELP.categories, cat.name);
+      const localized = Object.assign({}, cat, { name: categoryName });
+      return el('section', { className: 'panel hidden', id: 'panel-' + cat.id, dataset: { title: categoryName } }, [
+        el('div', { className: 'panel-head' }, [el('h2', { textContent: categoryName }), intro ? el('p', { textContent: intro }) : null]),
+        ...sectionCards(localized)]);
     }));
 
     const globals = OPDS_GLOBAL_KEYS.map((k) => settings.find((s) => s.key === k)).filter(Boolean);
     $('opdsDownloads').replaceChildren(...(globals.length ? sectionCards({ name: 'OPDS servers', rows: globals.map((s, i) =>
-      Object.assign({}, s, { subcategory: i === 0 ? 'Downloads' : '', submenu: '' })) }) : []));
+      Object.assign({}, s, { subcategory: i === 0 ? 'Загрузки' : '', submenu: '' })) }) : []));
     if (current) show(current);
     refreshDirty();
   }
@@ -374,13 +390,13 @@
     // The reader's categories exactly as /api/settings lists them, so a new one appears by itself;
     // then the three panels with endpoints of their own.
     $('categoryNav').replaceChildren(
-      el('div', { className: 'cat-group', textContent: 'On the reader' }),
-      el('div', { className: 'cat-list' }, categories.map((c) => link(c.id, c.name))),
-      el('div', { className: 'cat-group', textContent: 'Connections' }),
+      el('div', { className: 'cat-group', textContent: 'На устройстве' }),
+      el('div', { className: 'cat-list' }, categories.map((c) => link(c.id, ruLabel(c.name)))),
+      el('div', { className: 'cat-group', textContent: 'Подключения' }),
       el('div', { className: 'cat-list' }, [
-        link('wifi', 'Wi-Fi networks'),
-        link('opds', 'OPDS servers'),
-        link('plugins', 'Plugins')]));
+        link('wifi', 'Сети Wi-Fi'),
+        link('opds', 'Серверы OPDS'),
+        link('plugins', 'Плагины')]));
   }
 
   function panelIds() { return categories.map((c) => c.id).concat(EXTRA_PANELS); }

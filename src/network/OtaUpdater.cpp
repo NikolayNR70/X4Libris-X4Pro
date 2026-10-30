@@ -29,12 +29,9 @@
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/" CROSSPOINT_GIT_REPOSITORY "/releases/latest";
-constexpr char releaseListUrl[] = "https://api.github.com/repos/" CROSSPOINT_GIT_REPOSITORY "/releases?per_page=1";
 constexpr int otaHttpMaxAttempts = 3;
 constexpr unsigned long otaInitialRetryDelayMs = 1000;
 constexpr size_t releaseMetadataMaxBytes = 128 * 1024;
-
-const char* getReleaseApiUrl() { return SETTINGS.includeBetaUpdates ? releaseListUrl : latestReleaseUrl; }
 
 void delayBeforeRetry(const char* operation, int attempt) {
   const unsigned long delayMs = otaInitialRetryDelayMs << static_cast<unsigned int>(attempt - 1);
@@ -61,17 +58,17 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   totalSize = 0;
   render = false;
 
-  const char* releaseApiUrl = getReleaseApiUrl();
+  const char* releaseApiUrl = latestReleaseUrl;
 
   // Keep WiFi out of modem-sleep while doing release metadata HTTPS I/O.
   // This mirrors installUpdate() and reduces intermittent TLS read stalls.
   WifiPowerSaveGuard wifiPowerSaveGuard;
 
-  // Use one streaming parser path for both stable and beta update checks to
-  // avoid holding full GitHub release JSON in memory.
+  // Read only GitHub's latest stable release; beta releases are intentionally
+  // excluded from the device updater.
   // Adapted from crosspoint-reader/crosspoint-reader (MIT),
   // PR #1810 by znelson and contributors.
-  LOG_DBG("OTA", "Checking for %s update at %s", SETTINGS.includeBetaUpdates ? "beta" : "stable", releaseApiUrl);
+  LOG_DBG("OTA", "Checking for X4Libris stable update at %s", releaseApiUrl);
   // Each board updates from its own release asset: plain firmware.bin for the
   // combined C3 X3/X4 binary (the name pre-existing releases already use), and
   // firmware-<board>.bin for every other board. The board name comes from the
@@ -147,7 +144,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
     memcpy(otaSha256, releaseParser.getFirmwareSha256(), sizeof(otaSha256));
     updateAvailable = true;
 
-    LOG_DBG("OTA", "Found %s update: %s", SETTINGS.includeBetaUpdates ? "beta" : "stable", latestVersion.c_str());
+    LOG_DBG("OTA", "Found X4Libris stable update: %s", latestVersion.c_str());
     return OK;
   }
 
@@ -166,6 +163,19 @@ bool OtaUpdater::isUpdateNewer() const {
   const bool currentIsBeta = strstr(currentVersion, "-rc.") != nullptr;
   const bool latestIsBeta = latestVersion.find("-rc.") != std::string::npos;
 
+  // X4Libris release tags are branded (`X4Libris-v1.0`, `X4Libris-v1.1`).
+  // Compare the numeric semver part while keeping the full tag for display and
+  // release downloads. Do not parse the `4` in the product name as a version.
+  size_t versionOffset = 0;
+  const size_t brandedTag = latestVersion.rfind("-v");
+  if (brandedTag != std::string::npos) {
+    versionOffset = brandedTag + 2;
+  } else if (!latestVersion.empty() && latestVersion[0] == 'v') {
+    versionOffset = 1;
+  }
+  if (versionOffset >= latestVersion.size()) return false;
+  const char* latestSemver = latestVersion.c_str() + versionOffset;
+
   // Semantic version check with optional RC suffix. `sscanf()` will stop when
   // it reaches part of the input string that doesn't match the format, so this
   // format string works for versions like "1.31", "1.34.2", "1.35.0-rc.1", and
@@ -173,7 +183,7 @@ bool OtaUpdater::isUpdateNewer() const {
   // This does not handle versions using the old "rc.<hash>" format, but
   // considering that people will need to manually install this release or later
   // to get this functionality anyway that should be fine.
-  sscanf(latestVersion.c_str(), "%d.%d.%d-rc.%d.%d", &latestMajor, &latestMinor, &latestPatch, &latestBetaRelease,
+  sscanf(latestSemver, "%d.%d.%d-rc.%d.%d", &latestMajor, &latestMinor, &latestPatch, &latestBetaRelease,
          &latestBetaBuild);
   sscanf(currentVersion, "%d.%d.%d-rc.%d.%d", &currentMajor, &currentMinor, &currentPatch, &currentBetaRelease,
          &currentBetaBuild);

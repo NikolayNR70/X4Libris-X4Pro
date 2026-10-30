@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KOSync conformance checks for the CrossPoint/witchhunt KOReader sync client.
+"""KOSync conformance checks for the X4Libris KOReader sync client.
 
 lib/KOReaderSync/KOReaderSyncClient.cpp is built on esp_http_client, so the host CMake
 toolchain in test/ cannot compile it and there is no native unit test for any of it. What
