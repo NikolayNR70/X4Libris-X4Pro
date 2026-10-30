@@ -14,10 +14,8 @@
 #include "components/UITheme.h"
 
 void WeatherSettingsActivity::buildMenuItems() {
-  menuItems.reserve(12);
+  menuItems.reserve(10);
   menuItems.push_back(SettingInfo::Separator(StrId::STR_SETTINGS_TITLE));
-  menuItems.push_back(SettingInfo::Toggle(StrId::STR_USE_WEATHER, &CrossPointSettings::useWeather, "useWeather",
-                                          StrId::STR_CAT_SYSTEM));
 
   menuItems.push_back(SettingInfo::Separator(StrId::STR_WEATHER_LOCATION));
   menuItems.push_back(SettingInfo::Action(StrId::STR_WEATHER_LOCATION, SettingAction::None));
@@ -112,12 +110,6 @@ void WeatherSettingsActivity::onActionSelected(int index) {
     WEATHER_SETTINGS.setPrecipUnit(current == WeatherPrecipUnit::MM ? WeatherPrecipUnit::INCH : WeatherPrecipUnit::MM);
     WEATHER_SETTINGS.saveToFile();
     requestUpdate();
-  }
-}
-
-void WeatherSettingsActivity::onSettingToggled(int index) {
-  if (menuItems[index].nameId == StrId::STR_USE_WEATHER) {
-    SETTINGS.saveToFile();
   }
 }
 

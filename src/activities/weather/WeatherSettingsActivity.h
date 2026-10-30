@@ -25,7 +25,6 @@ class WeatherSettingsActivity final : public MenuListActivity {
   void buildMenuItems();
   void onActionSelected(int index) override;
   std::string getItemValueString(int index) const override;
-  void onSettingToggled(int index) override;
 
   void launchCitySearch();
   // Searches for `query` and opens the matches as their own list.

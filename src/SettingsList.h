@@ -266,31 +266,25 @@ inline void buildSettings(const RowSink& emit) {
                          {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
                          StrId::STR_CAT_DISPLAY)
            .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
-  // --- User interface ---
-  // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
-  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
-                         {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                          StrId::STR_THEME_LYRA_CAROUSEL},
-                         "uiTheme", StrId::STR_CAT_DISPLAY)
-           .withSelectorActivity()
-           .withSubcategory(StrId::STR_MENU_DISP_UI));
-  emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
-                         {StrId::STR_NORMAL, StrId::STR_LARGE}, "uiFontSize", StrId::STR_CAT_DISPLAY));
+  // X4Libris uses one fixed interface theme and the system UI font size. Do not expose the
+  // inherited theme/font-size selectors; their old JSON keys are intentionally ignored.
   // Home screen entries: on = on the home screen, off = behind its "More" entry.
+  // Keep these persisted internally for the legacy landscape menu and the weather/bookmarks
+  // shortcut selector, but do not expose the obsolete placement controls in either UI.
   emit(SettingInfo::Toggle(StrId::STR_LIBRARY, &CrossPointSettings::showLibraryOnHome, "showLibraryOnHome",
-                           StrId::STR_CAT_DISPLAY)
+                           StrId::STR_NONE_OPT)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_READING_STATS, &CrossPointSettings::showReadingStatsOnHome,
-                           "showReadingStatsOnHome", StrId::STR_CAT_DISPLAY)
+                           "showReadingStatsOnHome", StrId::STR_NONE_OPT)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_GLOBAL_BOOKMARKS, &CrossPointSettings::showBookmarksOnHome, "showBookmarksOnHome",
-                           StrId::STR_CAT_DISPLAY)
+                           StrId::STR_NONE_OPT)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_FILE_TRANSFER, &CrossPointSettings::showFileTransferOnHome,
-                           "showFileTransferOnHome", StrId::STR_CAT_DISPLAY)
+                           "showFileTransferOnHome", StrId::STR_NONE_OPT)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_WEATHER, &CrossPointSettings::showWeatherOnHome, "showWeatherOnHome",
-                           StrId::STR_CAT_DISPLAY)
+                           StrId::STR_NONE_OPT)
            .withSubmenu(StrId::STR_MENU_DISP_HOME));
   emit(SettingInfo::Toggle(StrId::STR_SHOW_BUSY_INDICATOR, &CrossPointSettings::showBusyIndicator, "showBusyIndicator",
                            StrId::STR_CAT_DISPLAY));
@@ -713,10 +707,9 @@ inline void buildSettings(const RowSink& emit) {
   emit(TimezoneOptions::make(StrId::STR_CLOCK));
   emit(SettingInfo::String(StrId::STR_NTP_SERVER, SETTINGS.ntpServer, sizeof(SETTINGS.ntpServer), "ntpServer",
                            StrId::STR_CLOCK));
-  // Weather
-  emit(SettingInfo::Toggle(StrId::STR_USE_WEATHER, &CrossPointSettings::useWeather, "useWeather", StrId::STR_WEATHER));
+  // Weather is always available in X4Libris; location and units remain configurable below.
   emit(SettingInfo::Toggle(StrId::STR_APPLICATIONS_FOLDER, &CrossPointSettings::useApplicationsFolder,
-                           "useApplicationsFolder", StrId::STR_CAT_SYSTEM));
+                           "useApplicationsFolder", StrId::STR_NONE_OPT));
 
   // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
   emit(SettingInfo::DynamicString(

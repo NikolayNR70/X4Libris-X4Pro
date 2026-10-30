@@ -5,7 +5,7 @@
 namespace {
 
 // What an entry needs before it appears anywhere.
-enum class Requires : uint8_t { Nothing, Bookmarks, WeatherEnabled, ApplicationsEnabled };
+enum class Requires : uint8_t { Nothing, Bookmarks, ApplicationsEnabled };
 
 struct HomeMenuRow {
   HomeMenuEntry entry;
@@ -32,9 +32,7 @@ constexpr HomeMenuRow kRows[] = {
     {{HomeMenuAction::FileTransfer, StrId::STR_FILE_TRANSFER, Transfer},
      Requires::Nothing,
      &CrossPointSettings::showFileTransferOnHome},
-    {{HomeMenuAction::Weather, StrId::STR_WEATHER, Weather},
-     Requires::WeatherEnabled,
-     &CrossPointSettings::showWeatherOnHome},
+    {{HomeMenuAction::Weather, StrId::STR_WEATHER, Weather}, Requires::Nothing, &CrossPointSettings::showWeatherOnHome},
     {{HomeMenuAction::Applications, StrId::STR_APPLICATIONS_FOLDER, Folder}, Requires::ApplicationsEnabled, nullptr},
     {{HomeMenuAction::Settings, StrId::STR_SETTINGS_TITLE, Settings}, Requires::Nothing, nullptr},
 };
@@ -47,8 +45,6 @@ bool isAvailable(const Requires requirement, const HomeMenuAvailability& availab
       return true;
     case Requires::Bookmarks:
       return availability.hasBookmarks;
-    case Requires::WeatherEnabled:
-      return SETTINGS.useWeather != 0;
     case Requires::ApplicationsEnabled:
       return availability.applicationsEnabled;
   }

@@ -23,9 +23,7 @@ HomeMoreActivity::HomeMoreActivity(GfxRenderer& renderer, MappedInputManager& ma
     if (availability.hasBookmarks) {
       entries.push_back({HomeMenuAction::GlobalBookmarks, StrId::STR_GLOBAL_BOOKMARKS, Book});
     }
-    if (SETTINGS.useWeather != 0) {
-      entries.push_back({HomeMenuAction::Weather, StrId::STR_WEATHER, Weather});
-    }
+    entries.push_back({HomeMenuAction::Weather, StrId::STR_WEATHER, Weather});
   } else {
     collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries);
   }

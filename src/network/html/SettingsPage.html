@@ -353,7 +353,8 @@
       groupName = '';
     };
     for (const s of cat.rows) {
-      if (!card || s.subcategory) newCard(s.subcategory);
+      const nextSection = s.subcategory || '';
+      if (!card || (nextSection && nextSection !== sectionName)) newCard(s.subcategory);
       const submenu = ruLabel(s.submenu || '');
       if (!rows || submenu !== groupName) {
         groupName = submenu;
@@ -551,7 +552,7 @@
     }
     const byName = new Map();
     for (const s of settings) {
-      if (OPDS_GLOBAL_KEYS.includes(s.key) || !s.category || s.category === 'None') continue;
+      if (OPDS_GLOBAL_KEYS.includes(s.key) || !s.category || s.category === 'None' || ruLabel(s.category) === 'Нет') continue;
       if (!byName.has(s.category)) byName.set(s.category, { name: s.category, rows: [] });
       byName.get(s.category).rows.push(s);
     }

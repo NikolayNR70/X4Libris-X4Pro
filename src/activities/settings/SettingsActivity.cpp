@@ -31,9 +31,6 @@ fui::BitmapRef sketchSettingIcon(const StrId id) {
   const freeink::Icon* icon = nullptr;
   bool rotateLeft = false;
   switch (id) {
-    case StrId::STR_UI_THEME:
-      icon = &perfectink_image_24;
-      break;
     case StrId::STR_SLEEP_SCREEN:
       icon = &perfectink_open_book_24;
       break;
@@ -139,8 +136,7 @@ void SettingsActivity::onEnter() {
     // These three rows are redundant with the fixed X4Libris home/dashboard design.
     // Keep their schema and persisted values available to the web/API settings layer,
     // but do not expose them in the on-device settings lists.
-    if (setting.nameId == StrId::STR_APPLICATIONS_FOLDER || setting.nameId == StrId::STR_UI_THEME ||
-        setting.submenu == StrId::STR_MENU_DISP_HOME) {
+    if (setting.nameId == StrId::STR_APPLICATIONS_FOLDER || setting.submenu == StrId::STR_MENU_DISP_HOME) {
       return;
     }
     if (setting.category == StrId::STR_CAT_SYSTEM &&
@@ -154,7 +150,7 @@ void SettingsActivity::onEnter() {
     // This redesign changes only the headings shown in the on-device Screen page. Keep the shared
     // settings schema (and its web/API grouping) intact while matching the sketch's two sections.
     if (enriched.category == StrId::STR_CAT_DISPLAY) {
-      if (enriched.nameId == StrId::STR_UI_THEME || enriched.nameId == StrId::STR_SLEEP_SCREEN) {
+      if (enriched.nameId == StrId::STR_SLEEP_SCREEN) {
         enriched.subcategory = StrId::STR_SKETCH_SCREEN_APPEARANCE;
       } else if (enriched.nameId == StrId::STR_REFRESH_FREQ ||
                  enriched.nameId == StrId::STR_REFRESH_AFTER_IMAGE_PAGES) {
@@ -285,14 +281,12 @@ void SettingsActivity::onEnter() {
   // on-device presentation order; every SettingInfo, stored key, and action is kept.
   const auto screenMockupOrder = [](const SettingInfo& setting) {
     switch (setting.nameId) {
-      case StrId::STR_UI_THEME:
-        return 0;
       case StrId::STR_SLEEP_SCREEN:
-        return 1;
+        return 0;
       case StrId::STR_REFRESH_FREQ:
-        return 2;
+        return 1;
       case StrId::STR_TIME_TO_SLEEP:
-        return 3;
+        return 2;
       default:
         return 4;
     }

@@ -508,7 +508,7 @@ class CrossPointSettings {
   uint8_t opdsFilenameFormat = 0;
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
-  // UI Theme
+  // One fixed X4Libris interface theme; the inherited theme selector is not exposed.
   uint8_t uiTheme = LYRA;
   // Acknowledge a press that starts a slow screen change. See ActivityManager::showBusyIndicator().
   uint8_t showBusyIndicator = 1;
@@ -517,7 +517,7 @@ class CrossPointSettings {
   // HalDisplay's measurement, never from the UI, and absent from the JSON settings file for that
   // reason. 0 means not yet measured.
   uint16_t measuredFastRefreshMs = 0;
-  // Menu/chrome text size (UI_FONT_SIZE)
+  // Standard system UI font scale; the inherited size selector is not exposed.
   uint8_t uiFontSize = UI_FONT_SIZE_DEFAULT;
   // Sunlight fading compensation
   uint8_t fadingFix = 0;
@@ -748,14 +748,12 @@ class CrossPointSettings {
   // Use clock and keep the LP timer running during deep sleep (GPIO13 HIGH)
   // so time can be accurately restored on wake. Increases sleep current by ~3-4 mA.
   uint8_t useClock = 0;
-  // Weather on or off as a feature. Off removes it from the home screen and from "More" alike;
-  // which of the two it sits on is showWeatherOnHome.
-  uint8_t useWeather = 1;
-  // The optional local applications folder (Notes) on Home.
+  // Weather is always available; location and units are stored in WeatherSettingsStore.
+  // Optional local applications folder (Notes) on Home; its inherited visibility control is hidden.
   uint8_t useApplicationsFolder = 1;
   // Which entries sit on the home screen (1) rather than behind its "More" entry (0). An entry
-  // with nothing behind it (no bookmarks, weather off) shows in neither place.
-  // Settings has no switch: it is where these are turned back on. See HomeMenu.cpp.
+  // with no available content (for example, no bookmarks) shows in neither place. These values
+  // remain internal for the legacy landscape menu and the weather/bookmarks home-card choice.
   uint8_t showLibraryOnHome = 1;
   // On by default, because a screen nobody can find is a screen nobody reads.
   uint8_t showReadingStatsOnHome = 1;
