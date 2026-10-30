@@ -911,7 +911,8 @@ void FileBrowserActivity::activateSelected(const bool longPress) {
     return;
   }
 
-  if (longPress && KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
+  if (longPress && KOREADER_STORE.hasCredentials() &&
+      (FsHelpers::hasEpubExtension(fullPath) || FsHelpers::hasFb2Extension(fullPath))) {
     auto& sync = APP_STATE.koReaderSyncSession;
     sync.autoPullEpubPath = fullPath;
     sync.postAction = KOReaderSyncPostAction::Reader;
@@ -1623,7 +1624,8 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
       return;
     }
     case Action::FetchAndOpen: {
-      if (KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
+      if (KOREADER_STORE.hasCredentials() &&
+          (FsHelpers::hasEpubExtension(fullPath) || FsHelpers::hasFb2Extension(fullPath))) {
         auto& sync = APP_STATE.koReaderSyncSession;
         sync.autoPullEpubPath = fullPath;
         sync.postAction = KOReaderSyncPostAction::Reader;
@@ -1667,6 +1669,17 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
     epub.setupCacheDir();
     cachePath = epub.getCachePath();
     // 7-byte EPUB progress: spine(2) + page(2) + pageCount(2) + percent(1)
+    data[6] = 100;
+    dataLen = 7;
+  } else if (FsHelpers::hasFb2Extension(fullPath)) {
+    // Direct FB2 reading uses EpubReaderActivity's same 7-byte progress record.
+    // Load metadata to resolve the FB2-specific cache path before writing it.
+    Epub fb2(fullPath, "/.crosspoint");
+    if (!fb2.load(false, true)) {
+      LOG_ERR("FBR", "Failed to prepare FB2 for mark-as-read: %s", fullPath.c_str());
+      return;
+    }
+    cachePath = fb2.getCachePath();
     data[6] = 100;
     dataLen = 7;
   } else if (FsHelpers::hasXtcExtension(fullPath)) {

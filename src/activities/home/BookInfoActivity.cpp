@@ -15,6 +15,8 @@
 #include <ctime>
 
 #include "ReadingStats.h"
+#include "RecentBooksStore.h"
+#include "activities/home/BookDetails.h"
 #include "components/TapZones.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -99,6 +101,24 @@ void BookInfoActivity::renderLoading() {
 void BookInfoActivity::loadData() {
   loadSucceeded = false;
   loadError.clear();
+  title.clear();
+  author.clear();
+  series.clear();
+  seriesIndex.clear();
+  description.clear();
+  coverBmpPath.clear();
+  fileSizeBytes = 0;
+  hasReadingStats = false;
+  statTotalSeconds = 0;
+  statProgress = 0;
+  statLastReadEpoch = 0;
+
+  // Recent entries already hold the metadata captured by the reader. This is
+  // especially important for FB2 and FB2-in-ZIP, which are not EPUB containers.
+  const RecentBook recent = RECENT_BOOKS.getBookByPath(filePath);
+  title = recent.title;
+  author = recent.author;
+  series = recent.series;
 
   // Get file size
   HalFile f = Storage.open(filePath.c_str());
@@ -147,9 +167,35 @@ void BookInfoActivity::loadData() {
     }
     coverBmpPath = Storage.exists(thumbPath.c_str()) ? thumbPath : "";
     loadSucceeded = true;
+  } else if (FsHelpers::hasFb2Extension(filePath)) {
+    // FB2 metadata is captured when the reader opens the book and stored in
+    // recent.json. Do not route these files through the EPUB parser: FB2 and
+    // ZIP-wrapped FB2 have their own reader path.
+    loadSucceeded = true;
+  } else if (FsHelpers::hasTxtExtension(filePath) || FsHelpers::hasMarkdownExtension(filePath)) {
+    // Plain text has no embedded metadata, but its .opf sidecar can supply
+    // title and author. Keep the reader's recent-entry values as a fallback.
+    BookDetails details;
+    if (BookDetailsLookup::cached(filePath, fileSizeBytes, details) ||
+        BookDetailsLookup::parse(filePath, fileSizeBytes, details)) {
+      if (!details.title.empty()) title = details.title;
+      if (!details.author.empty()) author = details.author;
+      if (!details.series.empty()) {
+        series = details.series;
+        if (!details.seriesIndex.empty()) series += " #" + details.seriesIndex;
+      }
+    }
+    loadSucceeded = true;
   } else {
     loadError = tr(STR_ERROR_GENERAL_FAILURE);
     LOG_ERR("BookInfo", "Unsupported file type for book info: %s", filePath.c_str());
+  }
+
+  // The Recent list can outlive a settings-side metadata edit. Prefer its
+  // saved labels only when a format-specific loader did not provide them.
+  if (title.empty()) {
+    const size_t slash = filePath.find_last_of('/');
+    title = slash == std::string::npos ? filePath : filePath.substr(slash + 1);
   }
 
   // Pull any recorded reading history for this book. Keyed by the same

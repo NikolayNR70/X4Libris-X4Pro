@@ -2,6 +2,7 @@
 
 #include <FsHelpers.h>
 #include <I18n.h>
+#include <RecentBooksStore.h>
 
 #include "../ActivityResult.h"
 #include "../settings/SettingInfo.h"
@@ -145,6 +146,10 @@ void FileContextMenuActivity::buildMenuItems() {
     // FB2 and FB2-in-ZIP are direct reader formats too. Keep their file actions
     // in step with the other book formats so the context menu can actually open them.
     menuItems.push_back(SettingInfo::Action(StrId::STR_OPEN, SettingAction::None));
+    if (KOREADER_STORE.hasCredentials()) {
+      menuItems.push_back(SettingInfo::Action(StrId::STR_FETCH_AND_OPEN, SettingAction::None));
+    }
+    menuItems.push_back(SettingInfo::Action(StrId::STR_MARK_AS_READ, SettingAction::None));
     menuItems.push_back(SettingInfo::Action(StrId::STR_INFO, SettingAction::None));
     menuItems.push_back(SettingInfo::Action(StrId::STR_DELETE_CACHE, SettingAction::None));
     menuItems.push_back(SettingInfo::Action(StrId::STR_REMOVE, SettingAction::None));
@@ -157,6 +162,7 @@ void FileContextMenuActivity::buildMenuItems() {
   } else if (isTxt) {
     menuItems.push_back(SettingInfo::Action(StrId::STR_OPEN, SettingAction::None));
     menuItems.push_back(SettingInfo::Action(StrId::STR_MARK_AS_READ, SettingAction::None));
+    menuItems.push_back(SettingInfo::Action(StrId::STR_INFO, SettingAction::None));
     menuItems.push_back(SettingInfo::Action(StrId::STR_REMOVE, SettingAction::None));
   } else if (offerFileManagement) {
     // Only All files lists a file the reader cannot open. Getting rid of it is most of what there
@@ -273,14 +279,18 @@ void FileContextMenuActivity::render(RenderLock&&) {
   const Rect contentRect = listContentRect();
 
   // Header: bare filename when a file is selected, otherwise a generic title
-  const std::string header = isBrowserMode
-                                 ? std::string(source == ListSource::Recents ? tr(STR_MENU_RECENT_BOOKS)
-                                               : source == ListSource::Index ? tr(STR_LIBRARY)
-                                                                             : tr(STR_SORT_BY))
-                                 : [&] {
-                                     const auto slashPos = filePath.rfind('/');
-                                     return (slashPos == std::string::npos) ? filePath : filePath.substr(slashPos + 1);
-                                   }();
+  std::string header = isBrowserMode
+                           ? std::string(source == ListSource::Recents ? tr(STR_MENU_RECENT_BOOKS)
+                                         : source == ListSource::Index ? tr(STR_LIBRARY)
+                                                                       : tr(STR_SORT_BY))
+                           : [&] {
+                               const auto slashPos = filePath.rfind('/');
+                               return (slashPos == std::string::npos) ? filePath : filePath.substr(slashPos + 1);
+                             }();
+  if (!isBrowserMode && source == ListSource::Recents) {
+    const RecentBook recent = RECENT_BOOKS.getBookByPath(filePath);
+    if (!recent.title.empty()) header = recent.title;
+  }
   GUI.drawHeader(renderer, listHeaderRect(), header.c_str());
 
   const int contentTop = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
