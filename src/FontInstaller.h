@@ -31,7 +31,7 @@ class FontInstaller {
   /// "<family>/<file>"-style entries.
   static bool isValidFontFileName(const char* name);
 
-  /// Ensure /.crosspoint/fonts/<family>/ directory exists.
+  /// Ensure /.x4libris/fonts/<family>/ directory exists.
   bool ensureFamilyDir(const char* familyName);
 
   /// Validate a .cpfont file on disk (check magic bytes).
@@ -44,7 +44,7 @@ class FontInstaller {
   static bool computeFileCrc32(const char* path, uint32_t& outCrc);
 
   /// Build the full SD path for a font file.
-  /// Writes "/.crosspoint/fonts/<family>/<filename>" to outBuf.
+  /// Writes "/.x4libris/fonts/<family>/<filename>" to outBuf.
   static void buildFontPath(const char* family, const char* filename, char* outBuf, size_t outBufSize);
 
   /// Build the staging-dir path "<FONTS_DIR>/<family>__staging".

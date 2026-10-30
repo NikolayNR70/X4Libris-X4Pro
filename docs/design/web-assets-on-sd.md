@@ -57,22 +57,22 @@ deterministic, the order is sorted), which is what lets one release asset serve 
 ### Installing
 
 `WebAssets::installFromFile()` reads the bundle twice: once to check its size and hash, then to
-split it into `/.crosspoint/web.new/`, write the stamp and rename that folder over
-`/.crosspoint/web/`. A cut download or a wrong file never touches the installed set. A power cut
+split it into `/.x4libris/web.new/`, write the stamp and rename that folder over
+`/.x4libris/web/`. A cut download or a wrong file never touches the installed set. A power cut
 between the delete and the rename leaves no folder, which reads as Missing and is reinstalled.
 
 Two sources:
 
 - **The release:** `https://github.com/<repo>/releases/download/<tag>/<asset>`, fetched with
   `HttpDownloader::downloadToFile` (Range chunks on a tight heap) into
-  `/.crosspoint/web-download.bin`. The tag is `WEB_BUNDLE_RELEASE_TAG`, set per env by
+  `/.x4libris/web-download.bin`. The tag is `WEB_BUNDLE_RELEASE_TAG`, set per env by
   `build_html.py`: the base version for the `*gh_release` envs, the CI tag for the
   `*gh_release_rc` envs, empty for everything that is never published.
 - **The card:** `/<asset name>` in the top folder. The setup page uploads a chosen file there
   through the ordinary `/upload`, under the asset's name; a user with a card reader or USB Drive can
   put it there directly. Installed copies are deleted, wrong ones are left for the user to see.
 
-`/.crosspoint` is already off limits to the web file endpoints (`ProtectedPaths`), so nothing but
+`/.x4libris` is already off limits to the web file endpoints (`ProtectedPaths`), so nothing but
 the installer writes the installed pages.
 
 ### Serving

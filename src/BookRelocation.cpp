@@ -20,7 +20,7 @@
 namespace BookRelocation {
 namespace {
 
-constexpr char CACHE_ROOT[] = "/.crosspoint";
+constexpr char CACHE_ROOT[] = "/.x4libris";
 // A long file name is up to 255 UTF-16 units, so up to 765 bytes of UTF-8.
 constexpr size_t NAME_BUFFER_BYTES = 768;
 

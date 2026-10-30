@@ -176,7 +176,7 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
   }
 
   if (FsHelpers::hasEpubExtension(nextBookPath)) {
-    Epub epub(nextBookPath, "/.crosspoint");
+    Epub epub(nextBookPath, "/.x4libris");
     epub.setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
     // loadForCover(), not load(): this preview needs metadata + the cover thumb, never the spine/TOC.
     // A full load() here rebuilt book.bin and reparsed the CSS for a book the user may not even open,
@@ -199,7 +199,7 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
   }
 
   if (FsHelpers::hasXtcExtension(nextBookPath)) {
-    Xtc xtc(nextBookPath, "/.crosspoint");
+    Xtc xtc(nextBookPath, "/.x4libris");
     if (xtc.load()) {
       metadata.title = xtc.getTitle();
       metadata.author = xtc.getAuthor();
@@ -213,7 +213,7 @@ NextBookMetadata loadNextBookMetadata(const std::string& nextBookPath) {
   }
 
   if (FsHelpers::hasMarkdownExtension(nextBookPath) || FsHelpers::hasTxtExtension(nextBookPath)) {
-    Txt txt(nextBookPath, "/.crosspoint");
+    Txt txt(nextBookPath, "/.x4libris");
     if (txt.load()) {
       metadata.title = txt.getTitle();
       if (txt.generateCoverBmp()) {
@@ -356,7 +356,7 @@ std::string findSeriesSequel(const std::string& directory, const std::string& cu
     yield();
 
     const std::string candidatePath = pathWithFilename(directory, fileName);
-    Epub epub(candidatePath, "/.crosspoint");
+    Epub epub(candidatePath, "/.x4libris");
     epub.setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
     // Metadata-only: no spine/TOC book.bin build, no manifest index, no CSS parse.
     if (!epub.loadForMetadata()) {

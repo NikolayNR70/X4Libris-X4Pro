@@ -10,7 +10,7 @@
 namespace {
 
 constexpr const char* MODULE = "FPRVC";
-constexpr const char* CACHE_DIR = "/.crosspoint/fontprev";
+constexpr const char* CACHE_DIR = "/.x4libris/fontprev";
 
 constexpr char MAGIC[4] = {'C', 'P', 'F', 'P'};
 // Bumped to 2 when the sample stopped being drawn in the theme's title weight

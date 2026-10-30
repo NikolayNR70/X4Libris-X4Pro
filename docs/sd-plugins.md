@@ -34,14 +34,14 @@ one directory scan per page load and no resident RAM.
     ...assets       optional, served flat via api.pluginFile()
 ```
 
-`<root>` is any of `/.crosspoint/plugins`, `/plugins`, or `/.plugins`. All three
+`<root>` is any of `/.x4libris/plugins`, `/plugins`, or `/.plugins`. All three
 are scanned; on a name collision the earliest in that order wins. The two
 dot-free roots exist because a dot-prefixed folder is awkward to create in some
 desktop file managers.
 
-**Clear Cache does not remove plugins**, including from `/.crosspoint/plugins`.
+**Clear Cache does not remove plugins**, including from `/.x4libris/plugins`.
 That action is an allowlist: it deletes only the `epub_`/`xtc_`/`txt_` per-book
-cache directories and leaves everything else in `/.crosspoint` alone. Note
+cache directories and leaves everything else in `/.x4libris` alone. Note
 though that `/plugins` is a normal visible folder, so unlike the two dot-prefixed
 roots it can be deleted through the web file manager like any other.
 
@@ -214,7 +214,7 @@ it is sent:
   page shows the manifest's title, description and `allowedHosts` and asks
   before installing.
 
-Installs go to `/.crosspoint/plugins/<name>`, through endpoints of their own
+Installs go to `/.x4libris/plugins/<name>`, through endpoints of their own
 (`/api/plugins/begin`, `/file`, `/commit`; see
 [webserver-endpoints.md](webserver-endpoints.md)): files are staged in
 `<name>.new` and switched in with one rename, so a plugin cut off half-way never
@@ -309,7 +309,7 @@ only be enabled on networks you trust — that is true with or without plugins.
 
 ## Debugging
 
-1. Copy the folder to `/.crosspoint/plugins/<name>/` on the card.
+1. Copy the folder to `/.x4libris/plugins/<name>/` on the card.
 2. Open Settings (or the File Manager) and check the card appears.
 3. `GET /api/plugins` shows exactly what the firmware discovered — if a plugin
    is missing from that list, the folder has no `plugin.js` or a same-named

@@ -159,13 +159,13 @@ void dropThumbnailsForCover(const String& imagePath) {
 void clearBookCacheIfNeeded(const String& filePath) {
   dropThumbnailsForCover(filePath);
   if (FsHelpers::hasEpubExtension(filePath)) {
-    Epub(filePath.c_str(), "/.crosspoint").clearCache();
+    Epub(filePath.c_str(), "/.x4libris").clearCache();
     LOG_DBG("WEB", "Cleared epub cache for: %s", filePath.c_str());
   } else if (FsHelpers::hasXtcExtension(filePath)) {
-    Xtc(filePath.c_str(), "/.crosspoint").clearCache();
+    Xtc(filePath.c_str(), "/.x4libris").clearCache();
     LOG_DBG("WEB", "Cleared xtc cache for: %s", filePath.c_str());
   } else if (FsHelpers::hasTxtExtension(filePath) || FsHelpers::hasMarkdownExtension(filePath)) {
-    const Txt txt(filePath.c_str(), "/.crosspoint");
+    const Txt txt(filePath.c_str(), "/.x4libris");
     const String cachePath = txt.getCachePath().c_str();
     if (Storage.exists(cachePath.c_str())) {
       Storage.removeDir(cachePath.c_str());
@@ -346,7 +346,7 @@ bool relayHostAllowed(const String& plugin, const std::string& url) {
 // only survive inside a filename ("my..book.epub"), which is legitimate.
 //
 // The protection rule is the one /upload applies to its target: every segment,
-// not just the file name, which on its own let a plugin write into /.crosspoint.
+// not just the file name, which on its own let a plugin write into /.x4libris.
 String pluginWriteTarget(const String& rawPath) {
   String path = normalizeWebPath(rawPath);
   if (path.isEmpty() || path == "/" || path.endsWith("/")) return "";
@@ -1602,7 +1602,7 @@ void CrossPointWebServer::handleCreateFolder() const {
     return;
   }
   // One component, never "." or "..": SdFat walks a ".." through the directory's own
-  // parent entry, so an unchecked "../.crosspoint/x" would land outside the parent.
+  // parent entry, so an unchecked "../.x4libris/x" would land outside the parent.
   if (!isSafePathComponent(folderName)) {
     server->send(400, "text/plain", "Invalid folder name");
     return;
@@ -3597,7 +3597,7 @@ void CrossPointWebServer::handleBookOpf() const {
     server->send(404, "application/json", "{\"error\":\"no such EPUB\"}");
     return;
   }
-  const Epub epub(path.c_str(), "/.crosspoint");
+  const Epub epub(path.c_str(), "/.x4libris");
   std::string opfPath;
   if (!epub.contentOpfPath(&opfPath)) {
     server->send(422, "application/json", "{\"error\":\"no OPF in this EPUB\"}");
@@ -3636,7 +3636,7 @@ String bookReplaceTarget(const String& rawPath) {
 
 // Everything in the book's cache folder except the reading position and the bookmarks.
 void dropLayoutCache(const String& bookPath) {
-  const std::string cacheDir = Epub(bookPath.c_str(), "/.crosspoint").getCachePath();
+  const std::string cacheDir = Epub(bookPath.c_str(), "/.x4libris").getCachePath();
   FsFile dir = Storage.open(cacheDir.c_str());
   if (!dir || !dir.isDirectory()) {
     if (dir) dir.close();

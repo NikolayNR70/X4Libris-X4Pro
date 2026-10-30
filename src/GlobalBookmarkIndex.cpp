@@ -101,7 +101,7 @@ void GlobalBookmarkIndex::load() {
 }
 
 void GlobalBookmarkIndex::save() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   FsFile f;
   if (!Storage.openFileForWrite("GBI", FILE_PATH, f)) {
     LOG_ERR("GBI", "Failed to open for write");

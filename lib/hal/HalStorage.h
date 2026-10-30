@@ -111,7 +111,7 @@ class HalStorage {
   uint64_t sdFreeBytes();
 
   // Goes up whenever the firmware creates, removes, renames or opens for writing anything on the
-  // card outside its own cache folder (/.crosspoint), and when a USB Drive session ends: whatever
+  // card outside its own cache folder (/.x4libris), and when a USB Drive session ends: whatever
   // was worked out from the card's contents before -- a folder's book count -- may no longer
   // hold. It errs towards going up: a write that changed nothing costs a recount, never a wrong
   // answer. Kept in RAM, so it means "since boot"; a card edited elsewhere while the device was

@@ -14,7 +14,7 @@
 OpdsServerStore OpdsServerStore::instance;
 
 namespace {
-constexpr char OPDS_FILE_JSON[] = "/.crosspoint/opds.json";
+constexpr char OPDS_FILE_JSON[] = "/.x4libris/opds.json";
 
 bool containsWhitespace(const std::string& value) {
   return std::any_of(value.begin(), value.end(), [](unsigned char ch) { return std::isspace(ch); });
@@ -46,7 +46,7 @@ std::optional<std::string> normalizeUrl(const std::string& url) {
 }  // namespace OpdsServerValidation
 
 bool OpdsServerStore::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   return JsonSettingsIO::saveOpds(*this, OPDS_FILE_JSON);
 }
 

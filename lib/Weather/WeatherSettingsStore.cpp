@@ -7,11 +7,11 @@
 WeatherSettingsStore WeatherSettingsStore::instance;
 
 namespace {
-constexpr char WEATHER_SETTINGS_FILE[] = "/.crosspoint/weather_settings.json";
+constexpr char WEATHER_SETTINGS_FILE[] = "/.x4libris/weather_settings.json";
 }
 
 bool WeatherSettingsStore::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
 
   JsonDocument doc;
   doc["latitude"] = latitude;

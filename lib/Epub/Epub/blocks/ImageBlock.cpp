@@ -73,7 +73,7 @@ bool ImageBlock::ensureExtracted() const {
     return false;
   }
   LOG_TRC("IMG", "Lazy-extracting image: %s -> %s", epubEntryPath_.c_str(), imagePath.c_str());
-  Epub epub(epubFilePath_, "/.crosspoint");
+  Epub epub(epubFilePath_, "/.x4libris");
   if ((FsHelpers::hasFb2Extension(epubFilePath_)) &&
       !epub.load(true, true)) {
     LOG_ERR("IMG", "Failed to reopen direct book image source: %s", epubFilePath_.c_str());
@@ -152,7 +152,7 @@ bool decodePngInPlace(const std::string& epubFilePath, const std::string& epubEn
   // Direct FB2 images live as extracted files in the renderer cache, not in a ZIP archive.
   // Let ImageBlock::ensureExtracted load that source and copy the image before decoding.
   if (FsHelpers::hasFb2Extension(epubFilePath)) return false;
-  Epub epub(epubFilePath, "/.crosspoint");
+  Epub epub(epubFilePath, "/.x4libris");
   uint32_t offset = 0;
   uint32_t size = 0;
   if (!epub.getStoredItemRange(epubEntryPath, &offset, &size) || size == 0) {
@@ -322,7 +322,7 @@ bool ImageBlock::isLargeImage() const {
     // Not extracted yet: ask the archive. One central-directory scan, and only ever on a
     // pixel-cache miss — the very next thing that happens is either a placeholder (cheap) or a
     // decode that costs seconds, so the scan is noise against both.
-    Epub epub(epubFilePath_, "/.crosspoint");
+    Epub epub(epubFilePath_, "/.x4libris");
     if (!epub.getItemSize(epubEntryPath_, &sourceBytes)) {
       sourceBytes = 0;  // unknown: treat as not-large, i.e. render it rather than hide it
     }
@@ -523,7 +523,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const b
   // for a JPEG whose header sits 14 KB in (X3 2026-09-25). One central-directory lookup per
   // first decode catches it: a size that differs from the entry's is re-extracted, once.
   if (!epubFilePath_.empty() && !epubEntryPath_.empty() && !FsHelpers::hasFb2Extension(epubFilePath_)) {
-    Epub epub(epubFilePath_, "/.crosspoint");
+    Epub epub(epubFilePath_, "/.x4libris");
     size_t entrySize = 0;
     if (epub.getItemSize(epubEntryPath_, &entrySize) && entrySize != 0 && entrySize != fileSize) {
       LOG_ERR("IMG", "Extract is %u bytes, entry is %u: re-extracting %s", static_cast<unsigned>(fileSize),

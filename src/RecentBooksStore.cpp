@@ -13,7 +13,7 @@
 #include "activities/home/BookDetails.h"
 
 namespace {
-constexpr char RECENT_BOOKS_FILE_JSON[] = "/.crosspoint/recent.json";
+constexpr char RECENT_BOOKS_FILE_JSON[] = "/.x4libris/recent.json";
 constexpr int MAX_RECENT_BOOKS = 10;
 
 // "Series #3", or just "Series" without an index.
@@ -135,7 +135,7 @@ bool RecentBooksStore::refreshSidecarMetadata(const size_t maxBooks) {
     if (FsHelpers::hasEpubExtension(book.path)) {
       // The same load the reader's metadata comes from, so a removed sidecar
       // restores the embedded values rather than leaving the old override.
-      Epub epub(book.path, "/.crosspoint");
+      Epub epub(book.path, "/.x4libris");
       if (!epub.loadForMetadata()) {
         LOG_DBG("RBS", "Sidecar metadata changed but book did not load, keeping entry: %s", book.path.c_str());
         continue;  // stamp left stale: retried next time
@@ -333,7 +333,7 @@ bool RecentBooksStore::saveToFile() const {
     LOG_ERR("RBS", "Not saving recent books: the list is not loaded, and would overwrite the file empty");
     return false;
   }
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   return JsonSettingsIO::saveRecentBooks(*this, RECENT_BOOKS_FILE_JSON);
 }
 
@@ -350,11 +350,11 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   // Use buildIfMissing=false to avoid heavy epub loading on boot; getTitle()/getAuthor() may be
   // blank until the book is opened, and entries with missing title are omitted from recent list.
   if (FsHelpers::hasEpubExtension(lastBookFileName)) {
-    Epub epub(path, "/.crosspoint");
+    Epub epub(path, "/.x4libris");
     epub.load(false, true);
     return RecentBook{path, epub.getTitle(), epub.getAuthor(), seriesLabel(epub), epub.getThumbBmpPath()};
   } else if (FsHelpers::hasXtcExtension(lastBookFileName)) {
-    Xtc xtc(path, "/.crosspoint");
+    Xtc xtc(path, "/.x4libris");
     if (xtc.load()) {
       return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), "", xtc.getThumbBmpPath()};
     }

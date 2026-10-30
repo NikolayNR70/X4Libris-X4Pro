@@ -29,7 +29,7 @@ constexpr uint16_t MAX_STRING = 1024;
 // The header's acceptRules: bit 0 is the Show Hidden Files setting the walk used, the bits above it
 // the revision of what the walk always leaves out. Either changing lists other books, so an index
 // recorded under another value is rebuilt. Revision 1: ProtectedPaths::holdsNoBooks at any depth
-// (revision 0 skipped only the root's .crosspoint and System Volume Information).
+// (revision 0 skipped only the root's .x4libris and System Volume Information).
 constexpr uint8_t ACCEPT_RULES_REVISION = 1;
 constexpr uint8_t acceptRules(const bool showHidden) {
   return static_cast<uint8_t>((ACCEPT_RULES_REVISION << 1) | (showHidden ? 1 : 0));
@@ -38,8 +38,8 @@ constexpr uint8_t acceptRules(const bool showHidden) {
 constexpr uint8_t BOOK_METADATA_REVISION = 3;
 
 // Where the index and a build's working files live on the card.
-constexpr const char* DIR = "/.crosspoint/library";
-constexpr const char* INDEX_PATH = "/.crosspoint/library/library.bin";
+constexpr const char* DIR = "/.x4libris/library";
+constexpr const char* INDEX_PATH = "/.x4libris/library/library.bin";
 
 #pragma pack(push, 1)
 struct Header {

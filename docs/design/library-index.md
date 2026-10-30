@@ -65,10 +65,10 @@ ideas are kept: identity reconciliation, write-then-rename, and "first seen" as 
 `LibraryBuilder` is a step machine: each `step()` does one bounded piece -- a few dozen directory
 entries, the join, a publish, or one book's author -- so the screen stays responsive. Every phase but
 the walk needs the lent secondary framebuffer, one phase at a time. Working files live in
-`/.crosspoint/library/` beside the index.
+`/.x4libris/library/` beside the index.
 
 1. **Walk.** Depth first, at most 8 levels, by the Books tab's rules (books only; hidden entries only
-   when shown; never `.crosspoint`, `System Volume Information` or `XTCache`, at any depth and
+   when shown; never `.x4libris`, `.crosspoint`, `System Volume Information` or `XTCache`, at any depth and
    whatever the hidden setting: `ProtectedPaths::holdsNoBooks`). Each folder is listed twice: first
    its `.opf` sidecars into a table of 128 per folder, then its books, staged with identity, date,
    sidecar signature and path.
@@ -106,7 +106,7 @@ brings its own -- and built again only for a reason (`LibraryStaleness::rebuildN
   Move, Remove and New folder on the device, finished books moved to `/COMPLETED`, and a USB Drive
   session (recorded at its start, while the card is still the firmware's to write: the host may change
   anything and the power may go first). The first such change after the mark leaves a marker file,
-  `/.crosspoint/content-changed`; a build that finishes with no change since it started removes it
+  `/.x4libris/content-changed`; a build that finishes with no change since it started removes it
   (`HalStorage::markContentSeen`). The servers end with a restart, which the marker survives.
 - **A change the firmware did not see**: a card edited in a computer's card reader. When the Books tab
   lists a book or folder dated later than the header's `newestDate` -- the newest book or folder the

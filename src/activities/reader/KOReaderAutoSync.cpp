@@ -18,7 +18,7 @@
 AutoSyncState AutoSyncState::instance;
 
 namespace {
-constexpr char AUTOSYNC_FILE_JSON[] = "/.crosspoint/autosync.json";
+constexpr char AUTOSYNC_FILE_JSON[] = "/.x4libris/autosync.json";
 
 // The client's already gating the wolfssl handshake, so this is just for association. Numbers
 // based on the worker's logs on a x4 pro.
@@ -62,7 +62,7 @@ bool AutoSyncState::saveToFile() {
 
   String json;
   serializeJson(doc, json);
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   const bool written = Storage.writeFile(AUTOSYNC_FILE_JSON, json);
   if (written) {
     dirty = false;

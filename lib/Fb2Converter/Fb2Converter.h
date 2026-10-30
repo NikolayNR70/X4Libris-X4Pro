@@ -36,7 +36,7 @@ bool readMetadata(const std::string& source, std::string& title, std::string& au
                   std::string& seriesIndex, std::string& error);
 
 // Parses the original FB2 and writes only private renderer cache files (XHTML
-// sections, images, stylesheet and index) under /.crosspoint. It never creates
+// sections, images, stylesheet and index) under /.x4libris. It never creates
 // a sibling EPUB or renames/hides the source book.
 bool prepareReaderCache(const std::string& source, ReaderBook& book, std::string& error);
 

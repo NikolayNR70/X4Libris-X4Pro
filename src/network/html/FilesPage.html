@@ -7359,7 +7359,7 @@
       const options = new Set();
       options.add('/');
       options.add('/.sleep');
-      options.add('/.crosspoint');
+      options.add('/.x4libris');
 
       async function fetchFolders(path) {
         try {
@@ -7394,7 +7394,7 @@
       const normalFolders = Array.from(options).filter(p => !p.startsWith('/.'));
       const currentFolder = normalFolders.find(p => p === currentNormalized);
       const otherFolders = normalFolders.filter(p => p !== currentNormalized);
-      const protectedFolders = Array.from(options).filter(p => p === '/.crosspoint' || p === '/.sleep');
+      const protectedFolders = Array.from(options).filter(p => p === '/.x4libris' || p === '/.sleep');
 
       if (currentFolder !== undefined) {
         const option = document.createElement('option');

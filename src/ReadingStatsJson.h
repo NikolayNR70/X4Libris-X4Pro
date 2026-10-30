@@ -16,7 +16,7 @@
 // buffer and the global day buckets, however many books the file has.
 namespace ReadingStatsJson {
 
-constexpr char kPath[] = "/.crosspoint/reading-stats.json";
+constexpr char kPath[] = "/.x4libris/reading-stats.json";
 
 // How a pass over the file ended. NoMemory and IoError are transient — the file may be fine and a
 // later pass may succeed; Malformed is the file's own fault.

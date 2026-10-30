@@ -14,11 +14,11 @@
 // plugin.js (and optionally a manifest.json); the web server discovers it and
 // the browser loads it, so adding one needs no firmware build.
 //
-// /.crosspoint/plugins is the canonical home. /plugins and /.plugins are also
+// /.x4libris/plugins is the canonical home. /plugins and /.plugins are also
 // scanned because a dot-prefixed folder is awkward to create on some desktop
 // file managers, and copying a folder onto the card should be all it takes.
 namespace PluginLocations {
-inline constexpr const char* kRoots[] = {"/.crosspoint/plugins", "/plugins", "/.plugins"};
+inline constexpr const char* kRoots[] = {"/.x4libris/plugins", "/plugins", "/.plugins"};
 inline constexpr size_t kRootCount = sizeof(kRoots) / sizeof(kRoots[0]);
 // Where the Plugins page installs: the canonical root. Being inside a dot folder, the web file
 // endpoints leave it alone unless Show Hidden Files is on, so a plugin there normally changes only

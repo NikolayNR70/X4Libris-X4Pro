@@ -589,10 +589,10 @@ bool FileBrowserActivity::handleCoverTouch() {
 
 void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
   if (FsHelpers::hasEpubExtension(fullPath)) {
-    Epub(fullPath, "/.crosspoint").clearCache();
+    Epub(fullPath, "/.x4libris").clearCache();
     LOG_DBG("FileBrowser", "Cleared metadata cache for: %s", fullPath.c_str());
   } else if (FsHelpers::hasXtcExtension(fullPath)) {
-    Xtc(fullPath, "/.crosspoint").clearCache();
+    Xtc(fullPath, "/.x4libris").clearCache();
     LOG_DBG("FileBrowser", "Cleared metadata cache for: %s", fullPath.c_str());
   }
 }
@@ -1665,7 +1665,7 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
   size_t dataLen = 0;
 
   if (FsHelpers::hasEpubExtension(fullPath)) {
-    Epub epub(fullPath, "/.crosspoint");
+    Epub epub(fullPath, "/.x4libris");
     epub.setupCacheDir();
     cachePath = epub.getCachePath();
     // 7-byte EPUB progress: spine(2) + page(2) + pageCount(2) + percent(1)
@@ -1674,7 +1674,7 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
   } else if (FsHelpers::hasFb2Extension(fullPath)) {
     // Direct FB2 reading uses EpubReaderActivity's same 7-byte progress record.
     // Load metadata to resolve the FB2-specific cache path before writing it.
-    Epub fb2(fullPath, "/.crosspoint");
+    Epub fb2(fullPath, "/.x4libris");
     if (!fb2.load(false, true)) {
       LOG_ERR("FBR", "Failed to prepare FB2 for mark-as-read: %s", fullPath.c_str());
       return;
@@ -1683,14 +1683,14 @@ void FileBrowserActivity::doMarkAsRead(const std::string& fullPath) {
     data[6] = 100;
     dataLen = 7;
   } else if (FsHelpers::hasXtcExtension(fullPath)) {
-    Xtc xtc(fullPath, "/.crosspoint");
+    Xtc xtc(fullPath, "/.x4libris");
     xtc.setupCacheDir();
     cachePath = xtc.getCachePath();
     // 5-byte XTC progress: page(4) + percent(1)
     data[4] = 100;
     dataLen = 5;
   } else if (FsHelpers::hasTxtExtension(fullPath) || FsHelpers::hasMarkdownExtension(fullPath)) {
-    Txt txt(fullPath, "/.crosspoint");
+    Txt txt(fullPath, "/.x4libris");
     txt.setupCacheDir();
     cachePath = txt.getCachePath();
     // 7-byte TXT progress: page(2) + offset(4) + percent(1)

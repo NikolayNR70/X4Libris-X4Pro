@@ -141,7 +141,7 @@ OpdsEntry readEntryFromCache(HalFile& f) {
   return entry;
 }
 
-// Per-server discovery cache (/.crosspoint/opds_XXXXXXXX_disc.json):
+// Per-server discovery cache (/.x4libris/opds_XXXXXXXX_disc.json):
 // Stores the root feed's nav entries and search template so the browser can
 // open instantly without a network round-trip. The filename is derived from a
 // 32-bit FNV-1a hash of the server URL. Format:
@@ -155,7 +155,7 @@ std::string opdsDiscoveryPath(const std::string& serverUrl) {
     h *= 16777619u;
   }
   char buf[48];
-  snprintf(buf, sizeof(buf), "/.crosspoint/opds_%08lx_disc.json", static_cast<unsigned long>(h));
+  snprintf(buf, sizeof(buf), "/.x4libris/opds_%08lx_disc.json", static_cast<unsigned long>(h));
   return buf;
 }
 
@@ -199,7 +199,7 @@ bool loadOpdsDiscovery(const std::string& serverUrl, std::string& searchTemplate
 void saveOpdsDiscovery(const std::string& serverUrl, const std::string& searchTemplate,
                        const std::vector<std::pair<std::string, std::string>>& navEntries) {
   if (navEntries.empty() && searchTemplate.empty()) return;
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
 
   JsonDocument doc;
   doc["v"] = 1;
@@ -963,10 +963,10 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
         }
       }
 
-      Epub epub(filename, "/.crosspoint");
+      Epub epub(filename, "/.x4libris");
       epub.clearCache();
     } else if (acquisition.formatKey == "xtc" || acquisition.formatKey == "xtch") {
-      Xtc(filename, "/.crosspoint").clearCache();
+      Xtc(filename, "/.x4libris").clearCache();
     }
     selectedBookIndex = -1;
     formatSelectionLabels.clear();

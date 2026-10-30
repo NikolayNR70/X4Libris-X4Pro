@@ -789,13 +789,13 @@ bool WebDAVHandler::getOverwrite(WebServer& s) const {
 
 void WebDAVHandler::clearEpubCacheIfNeeded(const String& path) const {
   if (FsHelpers::hasEpubExtension(path)) {
-    Epub(path.c_str(), "/.crosspoint").clearCache();
+    Epub(path.c_str(), "/.x4libris").clearCache();
     LOG_DBG("DAV", "Cleared epub cache for: %s", path.c_str());
   } else if (FsHelpers::hasXtcExtension(path)) {
-    Xtc(path.c_str(), "/.crosspoint").clearCache();
+    Xtc(path.c_str(), "/.x4libris").clearCache();
     LOG_DBG("DAV", "Cleared xtc cache for: %s", path.c_str());
   } else if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
-    const Txt txt(path.c_str(), "/.crosspoint");
+    const Txt txt(path.c_str(), "/.x4libris");
     const String cachePath = txt.getCachePath().c_str();
     if (Storage.exists(cachePath.c_str())) {
       Storage.removeDir(cachePath.c_str());

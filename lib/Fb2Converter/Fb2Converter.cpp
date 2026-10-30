@@ -1187,12 +1187,12 @@ bool Fb2Converter::readMetadata(const std::string& source, std::string& title, s
   HalFile* parseSource = &sourceFile;
   std::string extractedPath;
   if (zippedFb2) {
-    if (!Storage.ensureDirectoryExists("/.crosspoint/tmp")) {
+    if (!Storage.ensureDirectoryExists("/.x4libris/tmp")) {
       error = "Cannot prepare temporary FB2 folder";
       return false;
     }
     char name[96];
-    snprintf(name, sizeof(name), "/.crosspoint/tmp/fb2-meta-%08lx-%08lx.fb2",
+    snprintf(name, sizeof(name), "/.x4libris/tmp/fb2-meta-%08lx-%08lx.fb2",
              static_cast<unsigned long>(std::hash<std::string>{}(source)), static_cast<unsigned long>(millis()));
     extractedPath = name;
     uint32_t extractedSize = 0;
@@ -1414,7 +1414,7 @@ bool Fb2Converter::convert(const std::string& source, std::string& epub, std::st
     return false;
   }
   auto& c = *holder;
-  c.dir = std::string("/.crosspoint") + key;
+  c.dir = std::string("/.x4libris") + key;
   // Publish the converted book next to its source, never in the hidden cache.
   // An existing sibling EPUB may be unrelated: refuse rather than overwrite
   // it or silently open a different book.
@@ -1483,7 +1483,7 @@ bool Fb2Converter::convert(const std::string& source, std::string& epub, std::st
   return true;
 }
 std::string Fb2Converter::sourcePath(const std::string& epub) {
-  if (epub.rfind("/.crosspoint/fb2-v1-", 0) != 0 && epub.rfind("/.crosspoint/fb2-v2-", 0) != 0) return epub;
+  if (epub.rfind("/.x4libris/fb2-v1-", 0) != 0 && epub.rfind("/.x4libris/fb2-v2-", 0) != 0) return epub;
   auto path = epub.substr(0, epub.find_last_of('/')) + "/source.txt";
   const String original = Storage.readFile(path.c_str());
   return original.length() ? std::string(original.c_str()) : epub;

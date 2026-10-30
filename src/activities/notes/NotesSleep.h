@@ -8,7 +8,7 @@ class GfxRenderer;
 
 namespace notes {
 
-constexpr const char* kAsleepFile = "/.crosspoint/notes-asleep.txt";
+constexpr const char* kAsleepFile = "/.x4libris/notes-asleep.txt";
 
 bool readAsleep(AsleepChoice& out);
 bool writeAsleep(const AsleepChoice& choice);

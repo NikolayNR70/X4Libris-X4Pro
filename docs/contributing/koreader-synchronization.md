@@ -237,7 +237,7 @@ and, if it brought the radio up, takes it down again after the job. The reader s
 - **Sleep push** (`maybeAutoPushOnSleep`, from `onExit`): maps the page and stashes the job;
   `SleepActivity::onEnter` posts it and waits for it up to `SLEEP_PUSH_JOIN_TIMEOUT_MS`.
 
-Neither push compares with the server first. `AutoSyncState` (`/.crosspoint/autosync.json`) keeps
+Neither push compares with the server first. `AutoSyncState` (`/.x4libris/autosync.json`) keeps
 the last pushed position, the page turns since, whether a push is pending and whether the last one
 failed (the status bar's sync indicator).
 

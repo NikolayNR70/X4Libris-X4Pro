@@ -23,7 +23,7 @@
 // the flushing. Every field is little-endian and written field by field.
 namespace ReadingStatsSlotFile {
 
-constexpr char kPath[] = "/.crosspoint/reading-stats.bin";
+constexpr char kPath[] = "/.x4libris/reading-stats.bin";
 
 constexpr uint16_t kVersion = 1;
 constexpr size_t kEntryCount = 100;             // the book cap

@@ -75,7 +75,7 @@ bool isListableName(const char* name) {
 
 // What the book listings add: the firmware's own folder and the system folders hold no books, so
 // they stay out even with hidden files shown, as they do in the library index. All files still
-// lists .crosspoint then.
+// lists .x4libris then.
 bool isBookListableName(const char* name) {
   return isListableName(name) && !ProtectedPaths::holdsNoBooks(name);
 }

@@ -7,14 +7,14 @@
 #include "BookmarkStore.h"
 
 // Aggregates bookmarks from every indexed book into a single queryable catalog.
-// Persisted as /.crosspoint/global_bookmarks.bin; updated incrementally when
+// Persisted as /.x4libris/global_bookmarks.bin; updated incrementally when
 // per-book BookmarkStore instances save, and reconciled against the filesystem
 // when GlobalBookmarksActivity opens.
 class GlobalBookmarkIndex {
  public:
   struct Entry {
     std::string sourcePath;  // e.g. /books/foo.epub
-    std::string cacheDir;    // e.g. /.crosspoint/tmp/epub_12345
+    std::string cacheDir;    // e.g. /.x4libris/tmp/epub_12345
     std::string title;       // display title
     bool isTxt = false;      // hint for jump dispatch
     std::vector<BookmarkStore::Bookmark> bookmarks;
@@ -23,7 +23,7 @@ class GlobalBookmarkIndex {
   // Singleton access.
   static GlobalBookmarkIndex& getInstance() { return instance; }
 
-  // Persist/load the index to/from /.crosspoint/global_bookmarks.bin.
+  // Persist/load the index to/from /.x4libris/global_bookmarks.bin.
   void load();
   void save() const;
   // Frees the entries, for a download that needs the heap. The next upsert, remove or reconcile
@@ -69,7 +69,7 @@ class GlobalBookmarkIndex {
   bool loaded = false;
 
   static constexpr uint8_t FILE_VERSION = 1;
-  static constexpr const char* FILE_PATH = "/.crosspoint/global_bookmarks.bin";
+  static constexpr const char* FILE_PATH = "/.x4libris/global_bookmarks.bin";
 
   std::vector<Entry>::iterator findBySourcePath(const std::string& sourcePath);
 };

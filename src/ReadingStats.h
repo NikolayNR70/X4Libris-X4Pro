@@ -13,7 +13,7 @@
 uint16_t localDayIndexFromEpoch(time_t epoch);
 uint16_t currentLocalDayIndex();
 
-// The reading history: /.crosspoint/reading-stats.bin (ReadingStatsSlotFile), one file with a fixed
+// The reading history: /.x4libris/reading-stats.bin (ReadingStatsSlotFile), one file with a fixed
 // place for every book. An update writes that book and the global figures, copy-on-write, never
 // the whole history: rewriting the old single JSON file took 2.7 s at a worst-case session end on
 // the X3. A reading-stats.json left by older firmware is imported into it once (prepare()).

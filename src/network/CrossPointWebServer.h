@@ -228,7 +228,7 @@ class CrossPointWebServer {
   void handlePluginFsData();
 
   // The Plugins page (/plugins): install, remove, enable and disable. Plugins installed here go to
-  // /.crosspoint/plugins, which the web file endpoints leave alone unless Show Hidden Files is on;
+  // /.x4libris/plugins, which the web file endpoints leave alone unless Show Hidden Files is on;
   // one copied by hand into /plugins or /.plugins is listed and managed the same way.
   void handlePluginsPage() const;
   // The File Manager's Details dialog reads an EPUB's own OPF from here.

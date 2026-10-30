@@ -147,7 +147,7 @@ Tick the boxes in front of several items (or the box in the header for all of th
 Moving or renaming a book here keeps its reading position, bookmarks and reading stats. A folder can
 only be deleted when it is empty, and deleting cannot be undone.
 
-Files and folders whose names start with a dot, such as the reader's own `.crosspoint` folder, are
+Files and folders whose names start with a dot, such as the reader's own `.x4libris` folder, are
 hidden unless **Show Hidden Files** is on in the reader's settings (**System**). Even then, the files
 holding your saved Wi-Fi, OPDS and KOReader passwords can't be downloaded or overwritten here. To change
 a saved password, use [Settings](#6-settings).

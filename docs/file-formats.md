@@ -11,7 +11,7 @@ truncates the file in place.
 
 ## Overview
 
-### `/.crosspoint/`
+### `/.x4libris/`
 
 | File | Written by | Version | Contents |
 |---|---|---|---|
@@ -391,7 +391,7 @@ A book with no cover at all gets a 1 x 1 placeholder BMP at each size (`ReaderAc
 
 ## `library.bin`
 
-`/.crosspoint/library/library.bin`: the book index the Library's New and Authors tabs read, built by
+`/.x4libris/library/library.bin`: the book index the Library's New and Authors tabs read, built by
 `LibraryBuilder` and read by `LibraryIndexReader` (`lib/LibraryIndex/`). The structs are in
 `LibraryFormat.h`; the design is in [design/library-index.md](design/library-index.md). Written under a
 temporary name and renamed into place. Little-endian, packed. A wrong magic or version, or sections
@@ -426,14 +426,14 @@ also writes `library.bin.names`, the author strings, and removes it when done.
 
 ## `content-changed`
 
-`/.crosspoint/content-changed`: an empty marker file that says the card changed since the last
+`/.x4libris/content-changed`: an empty marker file that says the card changed since the last
 finished library build, across reboots. `HalStorage::noteContentChange` leaves it on the first change
 after a build: anything the firmware creates, removes, renames or opens for writing outside
-`/.crosspoint`, the start and end of a USB Drive session, and a book or folder the Books tab lists with
+`/.x4libris`, the start and end of a USB Drive session, and a book or folder the Books tab lists with
 a date later than `library.bin`'s `newestDate` (`LibraryFreshness::checkListedEntry`,
 `HalStorage::noteFoundChange`). `HalStorage::markContentSeen` removes it when a build finishes, unless
 another change came while the build ran. While it is there, the next visit to New or Authors rebuilds
-the index (`LibraryStaleness::rebuildNeeded`). Being inside `/.crosspoint`, writing it is not itself a
+the index (`LibraryStaleness::rebuildNeeded`). Being inside `/.x4libris`, writing it is not itself a
 change.
 
 ## `fonts_families.bin`

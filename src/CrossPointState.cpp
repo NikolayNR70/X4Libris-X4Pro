@@ -5,13 +5,13 @@
 #include <Logging.h>
 
 namespace {
-constexpr char STATE_FILE_JSON[] = "/.crosspoint/state.json";
+constexpr char STATE_FILE_JSON[] = "/.x4libris/state.json";
 }  // namespace
 
 CrossPointState CrossPointState::instance;
 
 bool CrossPointState::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);
 }
 

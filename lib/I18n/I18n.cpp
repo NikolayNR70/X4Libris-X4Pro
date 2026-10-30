@@ -12,7 +12,7 @@
 using namespace i18n_strings;
 
 // Settings file path
-static constexpr const char* SETTINGS_FILE = "/.crosspoint/language.bin";
+static constexpr const char* SETTINGS_FILE = "/.x4libris/language.bin";
 static constexpr uint8_t SETTINGS_VERSION = 2;
 
 I18n& I18n::getInstance() {
@@ -97,7 +97,7 @@ const char* I18n::getLanguageCode(Language lang) const {
 }
 
 void I18n::saveSettings() {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
 
   FsFile file;
   if (!Storage.openFileForWrite("I18N", SETTINGS_FILE, file)) {

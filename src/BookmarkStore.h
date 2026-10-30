@@ -16,7 +16,7 @@ class BookmarkStore {
  public:
   using Bookmark = ::Bookmark;
 
-  // Load bookmarks from the cache directory (e.g. .crosspoint/tmp/epub_<hash>/).
+  // Load bookmarks from the cache directory (e.g. .x4libris/tmp/epub_<hash>/).
   void load(const std::string& cachePath) {
     basePath = cachePath;
     bookmarks.clear();

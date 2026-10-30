@@ -3,14 +3,14 @@
 This document describes the separate FB2-to-EPUB publishing/conversion action.
 The family-3 reader does not call this conversion path when opening an FB2:
 it reads the FB2 source directly and keeps its generated reader cache in
-`/.crosspoint/tmp/fb2-reader-v3-*`. Do not use this publishing action as the FB2
+`/.x4libris/tmp/fb2-reader-v3-*`. Do not use this publishing action as the FB2
 open workflow.
 
 Opening `Books/book.Fb2` produces `Books/book.epub`. Existing destinations,
 including files uploaded during conversion, are never replaced or reused.
 A collision leaves the source visible and reports an error.
 
-Conversion uses a separate `/.crosspoint/fb2-publish-v1-*` staging directory.
+Conversion uses a separate `/.x4libris/fb2-publish-v1-*` staging directory.
 The XML parser validates FB2 before packaging. Each packaged file is checked
 against its ZIP entry CRC while copying. After closing the archive, the entire
 ZIP (headers, contents, directory and footer) is read back and compared with

@@ -9,7 +9,7 @@
 #include <memory>
 
 namespace {
-constexpr const char* INDEX_DIR = "/.crosspoint/fileindex";
+constexpr const char* INDEX_DIR = "/.x4libris/fileindex";
 constexpr char MAGIC[4] = {'C', 'P', 'F', 'I'};
 constexpr uint8_t INDEX_VERSION = 2;
 // Run chunk: entries sorted in RAM before being flushed as one sorted run.
@@ -17,8 +17,8 @@ constexpr uint8_t INDEX_VERSION = 2;
 constexpr size_t CHUNK_ENTRIES = 64;
 constexpr size_t NAME_BUF_SIZE = FileIndex::MAX_NAME + 1;
 constexpr size_t CHUNK_BYTES = CHUNK_ENTRIES * 32;
-constexpr const char* TIES_PATH_A = "/.crosspoint/fileindex/ties.a";
-constexpr const char* TIES_PATH_B = "/.crosspoint/fileindex/ties.b";
+constexpr const char* TIES_PATH_A = "/.x4libris/fileindex/ties.a";
+constexpr const char* TIES_PATH_B = "/.x4libris/fileindex/ties.b";
 constexpr uint8_t SECTION_DIR = 1;
 constexpr uint8_t SECTION_FILE = 2;
 constexpr uint32_t FNV32_BASIS = 2166136261u;

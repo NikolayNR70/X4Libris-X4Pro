@@ -11,11 +11,11 @@
 WifiCredentialStore WifiCredentialStore::instance;
 
 namespace {
-constexpr char WIFI_FILE_JSON[] = "/.crosspoint/wifi.json";
+constexpr char WIFI_FILE_JSON[] = "/.x4libris/wifi.json";
 }  // namespace
 
 bool WifiCredentialStore::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   return JsonSettingsIO::saveWifi(*this, WIFI_FILE_JSON);
 }
 

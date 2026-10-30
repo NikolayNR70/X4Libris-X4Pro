@@ -4,7 +4,7 @@
 
 // A book renamed or moved on the card keeps what the reader knows about it.
 //
-// That knowledge is keyed by the book's path: its cache folder (/.crosspoint/tmp/epub_<hash of the
+// That knowledge is keyed by the book's path: its cache folder (/.x4libris/tmp/epub_<hash of the
 // path>, and the xtc_/txt_ equivalents, holding the reading position, bookmarks, laid-out
 // chapters and thumbnails), its row in the recent list, its entry in the global bookmark index, and
 // the last open book in state.json. Reading stats are keyed by a hash of the file NAME

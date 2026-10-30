@@ -71,8 +71,8 @@ class KOReaderDocumentId {
 
   // Hash cache helpers
   // Returns the path to the per-book cache file that stores the precomputed hash.
-  // Stores sync data under /.crosspoint/tmp/fb2_<hash>/ for FB2 and
-  // /.crosspoint/tmp/epub_<hash>/ for EPUB, keeping format-specific caches apart.
+  // Stores sync data under /.x4libris/tmp/fb2_<hash>/ for FB2 and
+  // /.x4libris/tmp/epub_<hash>/ for EPUB, keeping format-specific caches apart.
   static std::string getCacheFilePath(const std::string& filePath);
 
   // Returns the cached hash if the file size and fingerprint match, or empty

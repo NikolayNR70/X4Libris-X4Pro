@@ -47,7 +47,7 @@ class AppsActivity final : public Activity {
   };
   // Removed game IDs stay reserved to keep saved app settings compatible.
   static constexpr AppId kOrder[kVisibleAppCount] = {Clock, Today};
-  static constexpr char kSavePath[] = "/.crosspoint/games/apps.bin";
+  static constexpr char kSavePath[] = "/.x4libris/games/apps.bin";
 
   void layout();
   void open(AppId app);

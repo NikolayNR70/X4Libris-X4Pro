@@ -17,7 +17,7 @@ namespace clockface {
 
 namespace {
 
-constexpr char kSavePath[] = "/.crosspoint/games/clock.bin";
+constexpr char kSavePath[] = "/.x4libris/games/clock.bin";
 constexpr uint8_t kFileMagic[4] = {'V', 'C', 'L', '2'};
 constexpr int kGridMargin = 26;
 // A clock chip that was never set reports a date from long ago.

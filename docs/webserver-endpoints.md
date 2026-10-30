@@ -58,7 +58,7 @@ Each page is one HTML file from `src/network/html/`, gzip-encoded
 (`Content-Encoding: gzip`). The pages call the API below.
 
 Only the setup page is in the firmware. The others are a bundle on the SD card,
-in `/.crosspoint/web/`, which the setup page installs (see
+in `/.x4libris/web/`, which the setup page installs (see
 [Web Interface Bundle](#web-interface-bundle)). Until it is installed, `/` serves
 the setup page and every other page redirects (`302`) to `/setup`.
 
@@ -239,7 +239,7 @@ curl http://crosspoint.local/api/status/fast
 
 What the device's **Settings → System → Boot Diagnostics** screen shows: the
 hardware variant, how this boot started, and the last 16 sleep and boot events
-kept on the card (`/.crosspoint/bootdiag.bin`). Values are the same short English
+kept on the card (`/.x4libris/bootdiag.bin`). Values are the same short English
 tokens the screen prints, untranslated, so reports from different devices compare.
 The Diagnostics page reads it and saves it, with `/api/status`, as a bug report.
 Streamed; no parameters.
@@ -569,22 +569,22 @@ endpoints and WebDAV (except `PROPFIND`; see [WebDAV](#webdav)). The rules are i
 `ProtectedPaths` (`lib/FsHelpers/ProtectedPaths.h`); `isProtectedWebPath()`
 (`src/network/WebPathGuard.cpp`) applies them with the on-card alias lookup described below.
 
-- The credential stores (`/.crosspoint/wifi.json`, `opds.json`, `koreader.json`)
+- The credential stores (`/.x4libris/wifi.json`, `opds.json`, `koreader.json`)
   are never reachable, and neither is a file whose path starts with one of them, such as
   a temporary or backup copy beside it. Their passwords are obfuscated with a key derived
   from the device's MAC address, which any client on the network can see. With **Show
-  Hidden Files** on, the listing of `/.crosspoint` still shows them, but opening one is refused.
+  Hidden Files** on, the listing of `/.x4libris` still shows them, but opening one is refused.
 - `System Volume Information` and `XTCache` are never reachable, at any depth.
 - A segment starting with `.` is refused at any depth, unless **Show Hidden Files**
   is on. Then dot folders can be listed and walked through, so caches under
-  `/.crosspoint` can be cleaned up. But an item whose own name starts with `.` still
+  `/.x4libris` can be cleaned up. But an item whose own name starts with `.` still
   cannot be read, written, renamed, moved or deleted. WebDAV ignores the setting
   and always refuses dot segments.
 - Names are judged as the SD library opens them: leading spaces and trailing dots
-  and spaces are dropped, so `/ .crosspoint` and `/.crosspoint.` are
-  `/.crosspoint`. Matching ignores case.
+  and spaces are dropped, so `/ .x4libris` and `/.x4libris.` are
+  `/.x4libris`. Matching ignores case.
 - A path that names an entry by its 8.3 short alias rather than its real name, such
-  as `/CROSSP~1` for `/.crosspoint`, is refused. A file whose real name happens to
+  as `/CROSSP~1` for `/.x4libris`, is refused. A file whose real name happens to
   look like an alias stays reachable.
 
 ---
@@ -809,7 +809,7 @@ plugin folders and serves their bytes — plugin code runs in the browser. See
 
 ### GET `/api/plugins` - List Plugins
 
-Scans `/.crosspoint/plugins`, `/plugins`, and `/.plugins` and returns every
+Scans `/.x4libris/plugins`, `/plugins`, and `/.plugins` and returns every
 folder holding a `plugin.js`.
 
 **Request:**
@@ -819,7 +819,7 @@ curl http://crosspoint.local/api/plugins
 
 **Response (200 OK):**
 ```json
-[{"name":"organize-by-author","title":"Organize by Author","mount":"files","root":"/.crosspoint/plugins",
+[{"name":"organize-by-author","title":"Organize by Author","mount":"files","root":"/.x4libris/plugins",
   "disabled":false,"description":"Sorts the EPUBs of one folder ...","version":"1.0.0"}]
 ```
 
@@ -878,7 +878,7 @@ file is replaced. Reading stats follow the file name, so they always stay.
 ### Installing and managing plugins
 
 What the Plugins page (`GET /plugins`) uses. Installs go to
-`/.crosspoint/plugins/<name>`, which the file endpoints leave alone unless
+`/.x4libris/plugins/<name>`, which the file endpoints leave alone unless
 **Show Hidden Files** is on. `name` and `file` must each be a single path
 component.
 

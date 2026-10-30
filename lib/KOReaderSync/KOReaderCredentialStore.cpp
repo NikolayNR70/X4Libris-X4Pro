@@ -12,14 +12,14 @@
 KOReaderCredentialStore KOReaderCredentialStore::instance;
 
 namespace {
-constexpr char KOREADER_FILE_JSON[] = "/.crosspoint/koreader.json";
+constexpr char KOREADER_FILE_JSON[] = "/.x4libris/koreader.json";
 
 // Default sync server URL
 constexpr char DEFAULT_SERVER_URL[] = "https://sync.koreader.rocks:443";
 }  // namespace
 
 bool KOReaderCredentialStore::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   return JsonSettingsIO::saveKOReader(*this, KOREADER_FILE_JSON);
 }
 

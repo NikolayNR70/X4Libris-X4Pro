@@ -1080,7 +1080,7 @@ bool KOReaderSyncActivity::ensureEpubLoadedForMapping() {
 
   // Reload on demand to keep steady-state sync memory low. Mapping and chapter
   // lookup need EPUB metadata; TLS steps do not.
-  epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+  epub = std::make_shared<Epub>(epubPath, "/.x4libris");
   if (!epub->load(true, true)) {
     LOG_ERR("KOSync", "Failed to reload EPUB for mapping: %s", epubPath.c_str());
     epub.reset();

@@ -27,11 +27,11 @@
 namespace WebAssets {
 namespace {
 
-constexpr char WEB_DIR[] = "/.crosspoint/web";
+constexpr char WEB_DIR[] = "/.x4libris/web";
 // Unpacked here first and renamed over WEB_DIR only once complete, so a cut
 // install never replaces a working set.
-constexpr char STAGING_DIR[] = "/.crosspoint/web.new";
-constexpr char DOWNLOAD_PATH[] = "/.crosspoint/web-download.bin";
+constexpr char STAGING_DIR[] = "/.x4libris/web.new";
+constexpr char DOWNLOAD_PATH[] = "/.x4libris/web-download.bin";
 // Holds the installed bundle's SHA-256.
 constexpr char STAMP_FILE[] = "bundle.id";
 constexpr size_t COPY_CHUNK = 2048;
@@ -251,7 +251,7 @@ InstallError installFromRelease() {
   const std::string url = std::string("https://github.com/") + repository() + "/releases/download/" + releaseTag() +
                           "/" + web_bundle::ASSET_NAME;
   LOG_INF("WEB", "downloading the web interface: %s", url.c_str());
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   // Unverified TLS on purpose: the bytes are checked against the SHA-256 built
   // into this firmware, which authenticates them more strictly than a
   // certificate chain would, and skipping the chain verify keeps the handshake

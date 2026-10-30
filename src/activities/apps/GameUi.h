@@ -21,7 +21,7 @@
 // one bit deep, so "grey" here is always a pixel pattern.
 namespace gameui {
 
-constexpr char kSaveDir[] = "/.crosspoint/games";
+constexpr char kSaveDir[] = "/.x4libris/games";
 
 // The spacing every app screen shares, so they line up with one another:
 // - kHeaderGap between the header and the first thing below it, and between

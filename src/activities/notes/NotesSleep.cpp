@@ -24,7 +24,7 @@ bool readAsleep(AsleepChoice& out) {
 }
 
 bool writeAsleep(const AsleepChoice& choice) {
-  if (!Storage.ensureDirectoryExists("/.crosspoint")) return false;
+  if (!Storage.ensureDirectoryExists("/.x4libris")) return false;
   const std::string text = formatAsleep(choice);
   HalFile file;
   if (!Storage.openFileForWrite("NOTES", kAsleepFile, file)) {

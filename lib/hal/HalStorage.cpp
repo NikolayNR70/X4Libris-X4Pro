@@ -253,14 +253,14 @@ bool isCachePath(const char* path) {
       strcmp(path, "/weather_diagnostics.log") == 0 || strcmp(path, "/weather_diagnostics.previous.log") == 0) {
     return true;
   }
-  constexpr char kCacheRoot[] = "/.crosspoint";
+  constexpr char kCacheRoot[] = "/.x4libris";
   constexpr size_t kLength = sizeof(kCacheRoot) - 1;
   return strncmp(path, kCacheRoot, kLength) == 0 && (path[kLength] == '\0' || path[kLength] == '/');
 }
 
 // Left by the first change after HalStorage::markContentSeen(); inside the cache folder, so writing it
 // is not itself a change.
-constexpr char kChangeMarker[] = "/.crosspoint/content-changed";
+constexpr char kChangeMarker[] = "/.x4libris/content-changed";
 
 bool opensForWriting(const oflag_t oflag) {
   return (oflag & O_ACCMODE) != O_RDONLY || (oflag & (O_CREAT | O_TRUNC | O_APPEND)) != 0;

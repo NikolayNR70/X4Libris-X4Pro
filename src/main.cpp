@@ -391,7 +391,7 @@ void disarmSerialTransferReboot() {
 // consume the X3's one mandatory post-wake full sync on an interstitial and push the page behind
 // a second refresh (see enterDeepSleep). The presence of this file is therefore also what setup()
 // uses to tell the two resume flows apart.
-constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
+constexpr char SLEEP_FRAME_FILE[] = "/.x4libris/sleep_frame.bin";
 
 static void saveSleepFrameBuffer() {
   FsFile file;
@@ -772,7 +772,7 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   // bind and every later rebind run the same code path.
   applyUiFontScale();
 
-  // Discover SD card fonts (under /.crosspoint/fonts/) and load the family
+  // Discover SD card fonts (under /.x4libris/fonts/) and load the family
   // currently selected in settings (if any). Safe to call without an SD card.
   // Skipped on the serial-transfer boot path: that activity only uses built-in
   // UI fonts, and it reboots on exit, so Home re-discovers fonts then. Saves an
@@ -1296,6 +1296,12 @@ void setup() {
   // is on the card before anything later in setup() can hang or panic.
   BootDiag::persistBoot();
   logStartupMemory("after_storage_begin");
+
+  // Start this fork with its own SD-card namespace. Do not inspect or import anything from the
+  // retired /.crosspoint tree; the user configures X4Libris from defaults on first boot.
+  if (!Storage.ensureDirectoryExists("/.x4libris")) {
+    LOG_ERR("MAIN", "Could not create X4Libris data folder on SD card");
+  }
 
   SETTINGS.loadFromFile();
   // APP_STATE is needed before display init so Quick Resume can skip the on-wake resync

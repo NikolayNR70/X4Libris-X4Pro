@@ -90,8 +90,8 @@ void ClearCacheActivity::render(RenderLock&&) {
 void ClearCacheActivity::clearCache() {
   LOG_DBG("CLEAR_CACHE", "Clearing cache...");
 
-  // Open .crosspoint directory
-  auto root = Storage.open("/.crosspoint");
+  // Open .x4libris directory
+  auto root = Storage.open("/.x4libris");
   if (!root || !root.isDirectory()) {
     LOG_DBG("CLEAR_CACHE", "Failed to open cache directory");
     if (root) root.close();
@@ -112,7 +112,7 @@ void ClearCacheActivity::clearCache() {
     if (file.isDirectory() && (itemName == "tmp" || itemName.startsWith("epub_") ||
                                itemName.startsWith("xtc_") || itemName.startsWith("txt_") ||
                                itemName.startsWith("fb2-reader-v") || itemName == "fontprev")) {
-      String fullPath = "/.crosspoint/" + itemName;
+      String fullPath = "/.x4libris/" + itemName;
       LOG_DBG("CLEAR_CACHE", "Removing cache: %s", fullPath.c_str());
 
       file.close();  // Close before attempting to delete

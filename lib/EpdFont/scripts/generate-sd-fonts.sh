@@ -8,7 +8,7 @@
 #   Bookerly/, NotoSans/, OpenDyslexic/, Ubuntu/ — committed to git
 #   NotoSansCJK/ — downloaded automatically by this script (gitignored)
 #
-# Output goes to ./output/ (copy to SD card at /.crosspoint/fonts/)
+# Output goes to ./output/ (copy to SD card at /.x4libris/fonts/)
 
 set -e
 cd "$(dirname "$0")"
@@ -82,4 +82,4 @@ fi
 
 echo ""
 echo "=== Done ==="
-echo "Copy the contents of $OUTPUT_BASE/ to your SD card at /.crosspoint/fonts/"
+echo "Copy the contents of $OUTPUT_BASE/ to your SD card at /.x4libris/fonts/"

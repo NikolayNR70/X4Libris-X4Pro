@@ -5,8 +5,8 @@
 #include <vector>
 
 struct SdCardFontFileInfo {
-  std::string path;   // v4 on-disk naming: "/.crosspoint/fonts/<Family>/<Family>_<size>.cpfont"
-                      // e.g. "/.crosspoint/fonts/NotoSansCJK/NotoSansCJK_14.cpfont"
+  std::string path;   // v4 on-disk naming: "/.x4libris/fonts/<Family>/<Family>_<size>.cpfont"
+                      // e.g. "/.x4libris/fonts/NotoSansCJK/NotoSansCJK_14.cpfont"
   uint8_t pointSize;  // parsed from filename: 14
   uint8_t style;      // always 0 in v4 (all 4 styles bundled in one file);
                       // kept for potential future formats
@@ -38,7 +38,7 @@ class SdCardFontRegistry {
  public:
   static constexpr int MAX_SD_FAMILIES = 128;
   // Primary (writable) location. All installs/downloads/deletes target this root.
-  static constexpr const char* FONTS_DIR = "/.crosspoint/fonts";
+  static constexpr const char* FONTS_DIR = "/.x4libris/fonts";
   // Read-only fallback roots for upstream crosspoint-reader compatibility.
   // Upstream uses "/.fonts" (preferred, hidden) and "/fonts" (visible). Both are
   // scanned after the primary; primary wins on family-name conflicts.

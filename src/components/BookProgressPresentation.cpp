@@ -69,13 +69,13 @@ int readPercent(const std::string& bookPath) {
   int percentByteOffset = 0;  // byte index of the percent field in progress.bin
 
   if (FsHelpers::hasEpubExtension(bookPath)) {
-    cachePath = Epub(bookPath, "/.crosspoint").getCachePath();
+    cachePath = Epub(bookPath, "/.x4libris").getCachePath();
     percentByteOffset = 6;  // epub: [spineIdx(2), page(2), chapterPageCount(2), percent(1)]
   } else if (FsHelpers::hasXtcExtension(bookPath)) {
-    cachePath = Xtc(bookPath, "/.crosspoint").getCachePath();
+    cachePath = Xtc(bookPath, "/.x4libris").getCachePath();
     percentByteOffset = 4;  // xtc: [page(4), percent(1)]
   } else if (FsHelpers::hasTxtExtension(bookPath) || FsHelpers::hasMarkdownExtension(bookPath)) {
-    cachePath = Txt(bookPath, "/.crosspoint").getCachePath();
+    cachePath = Txt(bookPath, "/.x4libris").getCachePath();
     percentByteOffset = 6;  // txt: [page(2), offset(4), percent(1)]
   } else {
     return -1;

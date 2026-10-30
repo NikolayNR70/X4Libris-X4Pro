@@ -10,7 +10,7 @@
 /**
  * On-SD directory index for browsing folders with bounded RAM.
  *
- * One index file per directory (under /.crosspoint/fileindex/), holding every
+ * One index file per directory (under /.x4libris/fileindex/), holding every
  * accepted entry's metadata plus a sort-order table built with an external
  * (bounded-RAM) merge sort. Browsing reads only the visible rows back from SD,
  * so RAM use is independent of how many files the folder holds.

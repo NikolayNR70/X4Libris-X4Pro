@@ -70,9 +70,9 @@ bool parse(const std::string& bookPath, const uint32_t bookSize, BookDetails& ou
     if (!Fb2Converter::readMetadata(bookPath, out.title, out.author, out.series, out.seriesIndex, error)) return false;
     out.primaryAuthor = out.author;
     if (!applySidecar(bookPath, out)) return false;
-    Txt(bookPath, "/.crosspoint").setupCacheDir();
+    Txt(bookPath, "/.x4libris").setupCacheDir();
   } else if (FsHelpers::hasEpubExtension(bookPath)) {
-    Epub epub(bookPath, "/.crosspoint");
+    Epub epub(bookPath, "/.x4libris");
     // Past book.bin, which keeps no primary author: one OPF parse per book, then details.bin has it.
     // The .opf sidecar is applied by the load.
     if (!epub.loadForMetadata(scratch, /*useBookBin=*/false)) return false;
@@ -86,7 +86,7 @@ bool parse(const std::string& bookPath, const uint32_t bookSize, BookDetails& ou
     out.asin = epub.getAsin();
     epub.setupCacheDir();
   } else if (FsHelpers::hasXtcExtension(bookPath)) {
-    Xtc xtc(bookPath, "/.crosspoint");
+    Xtc xtc(bookPath, "/.x4libris");
     if (!xtc.load()) return false;
     out.title = xtc.getTitle();
     out.author = xtc.getAuthor();
@@ -97,7 +97,7 @@ bool parse(const std::string& bookPath, const uint32_t bookSize, BookDetails& ou
     // TXT and Markdown: the sidecar is all there is. Recorded even when it gave nothing (a malformed
     // sidecar), so the book is not read again on every visit; editing the sidecar changes its stamp.
     if (!applySidecar(bookPath, out)) return false;
-    Txt(bookPath, "/.crosspoint").setupCacheDir();
+    Txt(bookPath, "/.x4libris").setupCacheDir();
   }
   BookDetailsCache::write(detailsPath(bookPath), bookSize, SidecarFiles::metadataStamp(bookPath), out);
   return true;

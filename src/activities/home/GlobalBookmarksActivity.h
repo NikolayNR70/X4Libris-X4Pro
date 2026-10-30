@@ -12,7 +12,7 @@ struct Rect;
 // Home-screen activity that aggregates bookmarks from every indexed book and
 // jumps directly into the chosen book/position on Confirm.
 //
-// Data source: GlobalBookmarkIndex (persisted at /.crosspoint/global_bookmarks.bin).
+// Data source: GlobalBookmarkIndex (persisted at /.x4libris/global_bookmarks.bin).
 // Reconciles against the filesystem on entry (drops entries whose source file
 // has disappeared).
 //

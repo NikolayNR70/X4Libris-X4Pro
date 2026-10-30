@@ -15,7 +15,7 @@ PLACEHOLDERS = {}
 
 # Assets the firmware keeps in flash. Everything else is served from the SD card:
 # it goes into one bundle, web-<hash>.bin, which the firmware pins by SHA-256 and
-# installs into /.crosspoint/web (src/network/WebAssets.h). The setup page stays,
+# installs into /.x4libris/web (src/network/WebAssets.h). The setup page stays,
 # because it is what installs the bundle.
 FLASH_ASSETS = {"WebSetupPage.html"}
 
@@ -429,7 +429,7 @@ def render_bundle_header(entries: list, digest: bytes, asset_name: str, total: i
         "namespace web_bundle {",
         "",
         "struct Entry {",
-        "  const char* file;  // name under /.crosspoint/web, and its order in the bundle",
+        "  const char* file;  // name under /.x4libris/web, and its order in the bundle",
         "  const char* contentType;",
         "  uint32_t size;  // gzip bytes",
         "};",

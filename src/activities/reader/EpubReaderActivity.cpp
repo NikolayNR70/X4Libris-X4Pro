@@ -6801,7 +6801,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   const uint8_t effectiveImageRendering =
       stylePolicy.images(currentBook.imageRenderingOverride, SETTINGS.imageRendering);
 
-  auto epub = std::make_shared<Epub>(filePath, "/.crosspoint");
+  auto epub = std::make_shared<Epub>(filePath, "/.x4libris");
   // Load CSS when embeddedStyle is effectively enabled, as createSectionFile may need it to
   // rebuild the cache.
   if (!epub->load(true, !effectiveEmbeddedStyle)) {

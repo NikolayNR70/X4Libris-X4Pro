@@ -20,7 +20,7 @@
 #include "../../src/network/HttpDownloader.h"
 
 namespace {
-constexpr char WEATHER_CACHE_FILE[] = "/.crosspoint/weather_cache.json";
+constexpr char WEATHER_CACHE_FILE[] = "/.x4libris/weather_cache.json";
 constexpr uint32_t WEATHER_REQUEST_TIMEOUT_MS = 12000;
 constexpr uint32_t WEATHER_FORECAST_BUDGET_MS = 30000;
 std::string urlEncode(const std::string& value);
@@ -940,7 +940,7 @@ bool WeatherClient::parseWeatherJson(const std::string& json, WeatherData& data,
 }
 
 bool WeatherClient::saveCache(const WeatherData& data) {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
 
   JsonDocument doc;
   doc["requestSignature"] = data.requestSignature;

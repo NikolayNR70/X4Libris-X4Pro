@@ -9,10 +9,10 @@
 //
 // The web server used to test only the LAST component of a requested path, on the
 // theory that a protected item is always the thing being named. It is not: a request
-// for "/.crosspoint/wifi.json" names "wifi.json", which passed, and that file holds
+// for "/.x4libris/wifi.json" names "wifi.json", which passed, and that file holds
 // every saved WiFi password, obfuscated with a key any LAN peer can derive from the
 // device's MAC address. opds.json and koreader.json were exposed the same way, and the
-// plugin write endpoints could overwrite anything under /.crosspoint. The server has
+// plugin write endpoints could overwrite anything under /.x4libris. The server has
 // no authentication, so that was every client on the network while File Transfer ran.
 //
 // The rules, applied to every segment:
@@ -20,18 +20,18 @@
 //  - The system folders the file manager never lists are never reachable.
 //  - Dot-prefixed names are refused everywhere unless the user has turned on hidden
 //    files; then a dot FOLDER may be walked through (to clear caches under
-//    /.crosspoint, say), but an item that is itself dot-named still cannot be read,
-//    written, renamed, moved or deleted. That last rule is what stops /.crosspoint
+//    /.x4libris, say), but an item that is itself dot-named still cannot be read,
+//    written, renamed, moved or deleted. That last rule is what stops /.x4libris
 //    itself being renamed or moved, which would carry the credential stores out from
 //    under the denylist.
 //
 // Two spellings reach an entry without naming it, and both are closed here:
 //  - SdFat trims a name before opening it: leading spaces, trailing dots and spaces
-//    (FatFile::parsePathName). " .crosspoint" and ".crosspoint." open ".crosspoint",
+//    (FatFile::parsePathName). " .x4libris" and ".x4libris." open ".x4libris",
 //    so every segment is checked as SdFat will see it.
 //  - On FAT, a name that fails to match an entry's long name is compared with the
 //    entry's generated 8.3 alias (the short-entry compare in FatFile::open), so
-//    "CROSSP~1" opens ".crosspoint". No spelling rule maps an alias back to its long
+//    a short alias of ".x4libris". No spelling rule maps an alias back to its long
 //    name, so the caller resolves alias-shaped segments on the card and a request
 //    that spells an entry by its alias is refused outright: nothing legitimate does.
 //
@@ -48,8 +48,8 @@ inline constexpr const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTC
 // leave the device. Prefix-matched, so a sibling written next to one (a temp or backup
 // copy) is covered too. Mirrors WifiCredentialStore, OpdsServerStore and
 // KOReaderCredentialStore.
-inline constexpr const char* CREDENTIAL_FILES[] = {"/.crosspoint/wifi.json", "/.crosspoint/opds.json",
-                                                   "/.crosspoint/koreader.json"};
+inline constexpr const char* CREDENTIAL_FILES[] = {"/.x4libris/wifi.json", "/.x4libris/opds.json",
+                                                   "/.x4libris/koreader.json"};
 
 // What the request does with the path, which decides how its LAST segment is judged.
 enum class Target : uint8_t {
@@ -98,7 +98,8 @@ inline bool isProtectedName(const std::string_view name) { return isDotName(name
 // stores) and the system folders. The book listings and the library index leave them out even with
 // hidden files shown, at any depth -- a cache's copies and leftovers are not the reader's books.
 inline bool holdsNoBooks(const std::string_view name) {
-  return isSystemName(name) || equalsIgnoreCase(name, ".crosspoint");
+  // Keep the retired folder out of book listings too; it is never read or migrated.
+  return isSystemName(name) || equalsIgnoreCase(name, ".x4libris") || equalsIgnoreCase(name, ".crosspoint");
 }
 
 // Shaped like a generated 8.3 alias: a '~' followed by a digit, in a name that fits
@@ -147,7 +148,7 @@ bool isProtectedPath(const std::string_view path, const Target target, const boo
     const std::string_view name = effectiveName(path.substr(pos, end - pos));
     pos = end + 1;
     // A segment that trims to nothing is not a name to SdFat: a trailing one is
-    // skipped like a separator ("/.crosspoint/ " opens "/.crosspoint"), any other
+    // skipped like a separator ("/.x4libris/ " opens "/.x4libris"), any other
     // fails the open. Either way it names nothing, so the item rule below must
     // judge the last segment that DOES name something.
     if (name.empty()) continue;

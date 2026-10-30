@@ -131,7 +131,7 @@ void clearAbortBuckets() {
 // Persisted ring
 // ---------------------------------------------------------------------------
 
-constexpr char kRingPath[] = "/.crosspoint/bootdiag.bin";
+constexpr char kRingPath[] = "/.x4libris/bootdiag.bin";
 
 // One 272-byte scratch image, reused by both writers. Static rather than stack: the sleep
 // path runs on the loop task after the render task has been left holding its own buffers,
@@ -164,7 +164,7 @@ bool readImage() {
 }
 
 bool writeImage() {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   HalFile file;
   if (!Storage.openFileForWrite("DIAG", kRingPath, file)) {
     return false;

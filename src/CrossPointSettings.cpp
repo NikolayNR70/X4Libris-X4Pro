@@ -42,7 +42,7 @@ static_assert(SMALL_FONT_ID != 0, "Font ID collision with sentinel");
 CrossPointSettings CrossPointSettings::instance;
 
 namespace {
-constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
+constexpr char SETTINGS_FILE_JSON[] = "/.x4libris/settings.json";
 
 void enforceFixedShortActions(CrossPointSettings& settings) {
   settings.btnShortBack = static_cast<uint8_t>(CrossPointSettings::BUTTON_ACTION::BTN_DEFAULT);
@@ -177,7 +177,7 @@ void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings
 
 void CrossPointSettings::loadStartupFromNvs() {
   Preferences nvs;
-  nvs.begin("Crosspoint", true);  // read-only
+  nvs.begin("X4Libris", true);  // read-only; keep this fork's startup settings separate
   btnShortPower = nvs.getUChar("bSPwr", BTN_DEFAULT);
   btnDoublePower = nvs.getUChar("bDPwr", BTN_DEFAULT);
   useClock = nvs.getUChar("useClk", 0);
@@ -187,7 +187,7 @@ void CrossPointSettings::loadStartupFromNvs() {
 
 void CrossPointSettings::saveStartupToNvs() const {
   Preferences nvs;
-  nvs.begin("Crosspoint", false);  // read-write
+  nvs.begin("X4Libris", false);  // read-write; do not inherit CrossPoint startup settings
   nvs.putUChar("bSPwr", btnShortPower);
   nvs.putUChar("bDPwr", btnDoublePower);
   nvs.putUChar("useClk", useClock);
@@ -199,7 +199,7 @@ void CrossPointSettings::saveStartupToNvs() const {
 }
 
 bool CrossPointSettings::saveToFile() const {
-  Storage.mkdir("/.crosspoint");
+  Storage.mkdir("/.x4libris");
   saveStartupToNvs();
   return JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
 }

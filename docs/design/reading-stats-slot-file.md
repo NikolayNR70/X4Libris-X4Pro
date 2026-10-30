@@ -75,7 +75,7 @@ book removes that.
 
 ### 1. File layout
 
-One file, `/.crosspoint/reading-stats.bin`, created at its full size and never resized:
+One file, `/.x4libris/reading-stats.bin`, created at its full size and never resized:
 
 | Region | Offset | Size | Contents |
 |---|---|---|---|

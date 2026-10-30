@@ -3,7 +3,7 @@
 
     python scripts/gen_reading_stats_history.py --books 100 --days 60 --out reading-stats.json
 
-Copy the result to the card as /.crosspoint/reading-stats.json (back up the real one first).
+Copy the result to the card as /.x4libris/reading-stats.json (back up the real one first).
 """
 import argparse
 import json

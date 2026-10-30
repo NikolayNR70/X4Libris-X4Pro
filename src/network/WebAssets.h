@@ -14,7 +14,7 @@ class WebServer;
 // bundle, web-<hash>.bin: the gzip'd files back to back, in the order of
 // web_bundle::ENTRIES. The firmware carries only that table and the bundle's
 // SHA-256 (html/WebBundle.generated.h). Installing checks a bundle against the
-// hash and unpacks it into /.crosspoint/web; serving streams the files from
+// hash and unpacks it into /.x4libris/web; serving streams the files from
 // there. About 70 KB of flash this way, against a ~2 KB setup page.
 //
 // The hash is why the source does not matter: a download from the GitHub

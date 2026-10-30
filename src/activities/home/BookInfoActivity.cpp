@@ -129,7 +129,7 @@ void BookInfoActivity::loadData() {
 
   // Load epub metadata — builds cache if missing, which also gives us cover
   if (FsHelpers::hasEpubExtension(filePath)) {
-    Epub epub(filePath, "/.crosspoint");
+    Epub epub(filePath, "/.x4libris");
     if (!epub.load(true, true)) {
       loadError = tr(STR_LOAD_EPUB_FAILED);
       LOG_ERR("BookInfo", "Failed to load EPUB metadata: %s", filePath.c_str());
@@ -151,7 +151,7 @@ void BookInfoActivity::loadData() {
     coverBmpPath = Storage.exists(thumbPath.c_str()) ? thumbPath : "";
     loadSucceeded = true;
   } else if (FsHelpers::hasXtcExtension(filePath)) {
-    Xtc xtc(filePath, "/.crosspoint");
+    Xtc xtc(filePath, "/.x4libris");
     if (!xtc.load()) {
       loadError = tr(STR_LOAD_XTC_FAILED);
       LOG_ERR("BookInfo", "Failed to load XTC metadata: %s", filePath.c_str());

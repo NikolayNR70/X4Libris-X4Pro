@@ -481,9 +481,9 @@ size_t pickSleepImageIndex(size_t numFiles) {
 // tell "this will take seconds" from "this will fail immediately", and announcing an attempt that
 // then falls back to the default sleep screen is the lesser wrong.
 bool sleepCoverNeedsPreparing(const std::string& bookPath, bool cropped) {
-  if (FsHelpers::hasXtcExtension(bookPath)) return !Xtc(bookPath, "/.crosspoint").coverBmpReady();
-  if (FsHelpers::hasTxtExtension(bookPath)) return !Txt(bookPath, "/.crosspoint").coverBmpReady();
-  if (FsHelpers::hasEpubExtension(bookPath)) return !Epub(bookPath, "/.crosspoint").coverBmpReady(cropped);
+  if (FsHelpers::hasXtcExtension(bookPath)) return !Xtc(bookPath, "/.x4libris").coverBmpReady();
+  if (FsHelpers::hasTxtExtension(bookPath)) return !Txt(bookPath, "/.x4libris").coverBmpReady();
+  if (FsHelpers::hasEpubExtension(bookPath)) return !Epub(bookPath, "/.x4libris").coverBmpReady(cropped);
   return false;  // not a format with a cover: nothing to prepare, so nothing to announce
 }
 
@@ -787,7 +787,7 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
   BookOverlayInfo info;
 
   if (FsHelpers::checkFileExtension(bookPath, ".xtc") || FsHelpers::checkFileExtension(bookPath, ".xtch")) {
-    Xtc xtc(bookPath, "/.crosspoint");
+    Xtc xtc(bookPath, "/.x4libris");
     if (xtc.load()) {
       info.title = xtc.getTitle();
       info.author = xtc.getAuthor();
@@ -809,7 +809,7 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
       }
     }
   } else if (FsHelpers::hasTxtExtension(bookPath) || FsHelpers::hasMarkdownExtension(bookPath)) {
-    Txt txt(bookPath, "/.crosspoint");
+    Txt txt(bookPath, "/.x4libris");
     if (txt.load()) {
       info.title = txt.getTitle();
 
@@ -851,7 +851,7 @@ BookOverlayInfo SleepActivity::getBookOverlayInfo(const std::string& bookPath) c
       }
     }
   } else if (FsHelpers::checkFileExtension(bookPath, ".epub")) {
-    Epub epub(bookPath, "/.crosspoint");
+    Epub epub(bookPath, "/.x4libris");
     if (epub.load(true, true)) {
       info.title = epub.getTitle();
       info.author = epub.getAuthor();
@@ -1195,21 +1195,21 @@ void SleepActivity::renderCoverSleepScreen() const {
   }
 
   if (FsHelpers::hasXtcExtension(APP_STATE.openEpubPath)) {
-    Xtc lastXtc(APP_STATE.openEpubPath, "/.crosspoint");
+    Xtc lastXtc(APP_STATE.openEpubPath, "/.x4libris");
     if (lastXtc.load() && lastXtc.generateCoverBmp()) {
       coverBmpPath = lastXtc.getCoverBmpPath();
     } else {
       LOG_ERR("SLP", "Failed to load/generate XTC cover bmp");
     }
   } else if (FsHelpers::hasTxtExtension(APP_STATE.openEpubPath)) {
-    Txt lastTxt(APP_STATE.openEpubPath, "/.crosspoint");
+    Txt lastTxt(APP_STATE.openEpubPath, "/.x4libris");
     if (lastTxt.load() && lastTxt.generateCoverBmp()) {
       coverBmpPath = lastTxt.getCoverBmpPath();
     } else {
       LOG_ERR("SLP", "No cover image found for TXT file");
     }
   } else if (FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) {
-    Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
+    Epub lastEpub(APP_STATE.openEpubPath, "/.x4libris");
     // Skip loading css since we only need metadata here.
     if (lastEpub.load(true, true) && lastEpub.generateCoverBmp(cropped)) {
       coverBmpPath = lastEpub.getCoverBmpPath(cropped);

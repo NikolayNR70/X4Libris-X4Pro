@@ -225,7 +225,7 @@ After a local `act` pass, a real GitHub Actions run is still required to verify:
 - Exact steps to reproduce
 - Expected vs actual behavior
 - Serial logs from boot through failure
-- Whether issue reproduces after clearing `.crosspoint/` cache on SD card
+- Whether issue reproduces after clearing `/.x4libris/` cache on SD card
 
 ## Common troubleshooting references
 

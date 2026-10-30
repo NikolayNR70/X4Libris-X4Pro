@@ -22,7 +22,7 @@ graph TD
     D --> G[Home/Library/Settings flows]
     D --> H[Network/Web server flows]
     F --> I[lib/Epub parsing + layout + hyphenation]
-    I --> J[SD cache in .crosspoint]
+    I --> J[SD cache in .x4libris]
     D --> K[GfxRenderer]
     K --> L[E-ink display buffer]
 ```
@@ -167,7 +167,7 @@ Two singletons are central:
 Typical persisted areas on SD:
 
 ```text
-/.crosspoint/
+/.x4libris/
   epub_<hash>/
     book.bin
     progress.bin
