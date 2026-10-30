@@ -1,0 +1,65 @@
+name: Bug Report
+description: Report an issue or unexpected behavior
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this bug! Please fill out the details below to help us diagnose the problem.
+
+  - type: input
+    id: version
+    attributes:
+      label: Affected Firmware Version
+      description: What version or commit SHA are you running?
+      placeholder: e.g. v1.2.3 or 1f2e3d4
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device / Hardware Model
+      description: What device or target board are you using? (e.g. X3, X4, X4Pro, LilyGo T5)
+      placeholder: e.g. X4
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Clearly list the steps necessary to reproduce the unexpected behavior.
+      placeholder: |
+        1. Press physical power button
+        2. Open book '...'
+        3. Device hangs on page turn
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Serial Logs & Screenshots
+      description: |
+        Paste serial port logs or drop error screenshots here.
+        Need help capturing serial output? Follow our step-by-step guide:
+        [docs/debugging.md](https://github.com/jpirnay/witchhunt-reader/blob/master/docs/debugging.md)
+      render: shell

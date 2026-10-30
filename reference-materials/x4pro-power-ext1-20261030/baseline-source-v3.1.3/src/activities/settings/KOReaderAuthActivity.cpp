@@ -1,0 +1,202 @@
+#include "KOReaderAuthActivity.h"
+
+#include <GfxRenderer.h>
+#include <HalClock.h>
+#include <I18n.h>
+#include <Logging.h>
+#include <WiFi.h>
+
+#include "CrossPointSettings.h"
+#include "KOReaderCredentialStore.h"
+#include "KOReaderSyncClient.h"
+#include "MappedInputManager.h"
+#include "SilentRestart.h"
+#include "activities/NetworkMemoryTrim.h"
+#include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/KOReaderSyncWorker.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
+  if (!success) {
+    {
+      RenderLock lock(*this);
+      state = FAILED;
+      errorMessage = tr(STR_WIFI_CONN_FAILED);
+    }
+    requestUpdate();
+    return;
+  }
+
+  // Same reason as the sync path: modem sleep can stall a request for seconds, which shows up
+  // as an HTTP timeout on a handful of small round trips. WiFi is torn down on exit.
+  // Ported from crosspoint-reader PR #3233 (Jadehawk / @jadehawk).
+  WiFi.setSleep(false);
+  LOG_DBG("KOAuth", "WiFi sleep disabled for authentication");
+
+  {
+    RenderLock lock(*this);
+    if (mode == Mode::REGISTER) {
+      state = REGISTERING;
+      statusMessage = tr(STR_REGISTERING);
+    } else {
+      state = AUTHENTICATING;
+      statusMessage = tr(STR_AUTHENTICATING);
+    }
+  }
+  requestUpdateAndWait();  // show status before blocking TLS call
+
+  // Set the clock before the first TLS connect. This is what was missing: unlike the sync
+  // activity (and HttpDownloader) this path went straight from "WiFi up" to a wolfSSL connect,
+  // and on these RTC-less boards a cold boot that discarded a stale NVS epoch is sitting at
+  // 1970 — which puts every curated root's notBefore in the future and makes the trust store
+  // fail to LOAD, long before any certificate is seen. Not fatal if it fails: SecureClient then
+  // waives certificate dates only, keeping chain/signature/hostname checks intact.
+  HalClock::ensureUsableForTls(SETTINGS.ntpServer);
+  // Same escape hatch as the sync path: a self-hosted server with a private CA.
+  KOReaderSyncClient::setSkipTlsValidation(SETTINGS.skipHttpsValidation != 0);
+
+  if (mode == Mode::REGISTER) {
+    performRegistration();
+  } else {
+    performAuthentication();
+  }
+}
+
+void KOReaderAuthActivity::performAuthentication() {
+  const auto result = KOReaderSyncClient::authenticate();
+
+  {
+    RenderLock lock(*this);
+    if (result == KOReaderSyncClient::OK) {
+      state = SUCCESS;
+      statusMessage = tr(STR_AUTH_SUCCESS);
+    } else {
+      state = FAILED;
+      errorMessage = KOReaderSyncClient::errorString(result);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        errorMessage += " — ";
+        errorMessage += detail;
+      }
+    }
+  }
+  requestUpdate();
+}
+
+void KOReaderAuthActivity::performRegistration() {
+  const auto result = KOReaderSyncClient::registerUser();
+
+  {
+    RenderLock lock(*this);
+    if (result == KOReaderSyncClient::OK) {
+      state = SUCCESS;
+      statusMessage = tr(STR_REGISTER_SUCCESS);
+    } else if (result == KOReaderSyncClient::USER_EXISTS) {
+      state = USER_EXISTS;
+      errorMessage = KOReaderSyncClient::errorString(result);
+    } else {
+      state = FAILED;
+      errorMessage = KOReaderSyncClient::errorString(result);
+      const char* detail = KOReaderSyncClient::lastFailureDetail();
+      if (detail && detail[0]) {
+        errorMessage += " — ";
+        errorMessage += detail;
+      }
+    }
+  }
+  requestUpdate();
+}
+
+void KOReaderAuthActivity::onEnter() {
+  Activity::onEnter();
+
+#if CROSSPOINT_KOREADER_AUTOSYNC
+  if (KOReaderSyncWorker::isBusy()) {
+    {
+      RenderLock lock(*this);
+      state = AUTHENTICATING;
+      statusMessage = tr(STR_KO_BG_SYNC_WAIT);
+    }
+    requestUpdateAndWait();
+    constexpr unsigned long BACKGROUND_DRAIN_TIMEOUT_MS = 10000;
+    if (!KOReaderSyncWorker::drain(BACKGROUND_DRAIN_TIMEOUT_MS)) {
+      LOG_ERR("KOSync", "Background sync job still running; proceeding anyway");
+    }
+  }
+#endif
+
+  // Free the heap the WiFi stack needs before it is brought up, not after —
+  // association itself is the allocation-heavy step, well ahead of TLS.
+  trimMemoryForNetworkSession(renderer, "KOSync");
+
+  // Check if already connected
+  if (WiFi.status() == WL_CONNECTED) {
+    onWifiSelectionComplete(true);
+    return;
+  }
+
+  // Launch WiFi selection
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+}
+
+void KOReaderAuthActivity::onExit() {
+  Activity::onExit();
+
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(false);
+    delay(30);
+  }
+  // Unconditional: onEnter() released the secondary framebuffer for the network
+  // session and nothing reallocates it, so every exit path — including a
+  // cancelled WiFi selection that never brought the radio up — must reboot to
+  // restore double-buffered rendering. Land back in KOReader settings, where the
+  // user started, rather than on Home.
+  silentRestartToKOReaderSettings();
+}
+
+void KOReaderAuthActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+
+  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
+                 tr(STR_KOREADER_AUTH));
+  const auto height = renderer.getLineHeight(UI_10_FONT_ID);
+  const auto top = contentRect.y + (contentRect.height - height) / 2;
+
+  if (state == AUTHENTICATING || state == REGISTERING) {
+    renderer.drawCenteredText(UI_10_FONT_ID, top, statusMessage.c_str());
+  } else if (state == SUCCESS) {
+    const char* successMsg = (mode == Mode::REGISTER) ? tr(STR_REGISTER_SUCCESS) : tr(STR_AUTH_SUCCESS);
+    renderer.drawCenteredText(UI_10_FONT_ID, top, successMsg, true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, tr(STR_SYNC_READY));
+  } else if (state == USER_EXISTS) {
+    renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_USERNAME_TAKEN), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, top + height + 10, errorMessage.c_str());
+  } else if (state == FAILED) {
+    const char* failedMsg = (mode == Mode::REGISTER) ? tr(STR_REGISTER_FAILED) : tr(STR_AUTH_FAILED);
+    renderer.drawCenteredText(UI_10_FONT_ID, top, failedMsg, true, EpdFontFamily::BOLD);
+    const auto lines = renderer.wrappedText(UI_10_FONT_ID, errorMessage.c_str(), contentRect.width - 20, 4);
+    int y = top + height + 10;
+    for (const auto& line : lines) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+      y += height;
+    }
+  }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  renderer.displayBuffer();
+}
+
+void KOReaderAuthActivity::loop() {
+  if (state == SUCCESS || state == FAILED || state == USER_EXISTS) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
+        mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      finish();
+    }
+  }
+}

@@ -1,0 +1,337 @@
+name: CI (build)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install clang-format-21
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          sudo apt-get update
+          sudo apt-get install -y clang-format-21
+
+      - name: Run clang-format
+        run: |
+          export PATH="/usr/lib/llvm-21/bin:$PATH"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            diff_range="$base_sha...$head_sha"
+          else
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+            diff_range="$base_sha..$head_sha"
+          fi
+          mapfile -d '' files < <(git diff --name-only -z "$diff_range" -- '*.c' '*.cpp' '*.h' '*.hpp')
+          for file in "${files[@]}"; do
+            [[ -f "$file" ]] || continue
+            case "$file" in
+              freeink-sdk/*|.pio/*|.venv/*|lib/EpdFont/builtinFonts/*|lib/Epub/Epub/hyphenation/generated/*|lib/uzlib/*|lib/TJpgDec/*|*.generated.h) continue ;;
+            esac
+            clang-format-21 -style=file -i "$file"
+          done
+          git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
+
+      # The web Plugins page installs from plugins/catalog.json on master; a plugin changed without
+      # regenerating it would be offered with stale file names or versions.
+      - name: Check the plugin catalog
+        run: python3 scripts/build_plugin_catalog.py --check
+
+  cppcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # terser minifies the inline JS in the embedded web pages (see
+      # scripts/build_html.py). Without it the build still succeeds, but the
+      # generated pages are ~17% larger - so CI installs it to match a release.
+      - name: Install web asset tooling
+        run: npm ci
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-v2-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-v2-${{ runner.os }}-
+
+      - name: Pin pioarduino core inside the platform penv
+        run: |
+          set -euo pipefail
+          # Envs with custom_sdkconfig / custom_component_remove (every C3 env, via
+          # [firmware_tuned]) run a nested `pio run` from ~/.platformio/penv. Platform
+          # 55.03.311 bootstraps that penv with an open-ended "pioarduino>=6.1.19", which
+          # now resolves to 6.2.0. That core wants tool-scons 4.11.1 where the platform pins
+          # 4.8.1; the two reinstall over each other and SCons loses its package mid-build
+          # ("No module named 'SCons.Tool.FortranCommon'"). Keep the penv core on the same
+          # version as the outer core installed above. Green builds without this only ride
+          # on a restored cache whose penv predates 6.2.0.
+          # See https://github.com/pioarduino/platform-espressif32/issues/529
+          pio pkg install -e default
+          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
+          ~/.platformio/penv/bin/pio --version
+
+      - name: Install cppcheck runtime dependency
+        run: |
+          # pioarduino's Linux cppcheck binary links against libpcre.so.3.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpcre3
+
+      - name: Run cppcheck
+        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+
+  build:
+    # The C3 boards (X3/X4), the X4 Pro and the S3 LilyGo T5S3 are separate
+    # binaries built from different toolchains, so each gets its own leg.
+    # fail-fast is off so a break on one board still reports the others' result.
+    #
+    # Asset names match what the firmware's own OTA check asks GitHub for (see
+    # src/network/FirmwareBoardTag.h): plain firmware.bin for the combined C3
+    # X3/X4 binary, firmware-<board>.bin for every other board.
+    #
+    # Use the same release environments as release.yml so these size checks
+    # validate the exact binaries intended for OTA distribution, including the
+    # release log level and board-specific build flags.
+    name: Build (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: gh_release
+            label: X3/X4
+            asset: firmware.bin
+          - env: x4pro_gh_release
+            label: X4 Pro
+            asset: firmware-x4pro.bin
+          - env: lilygo_gh_release
+            label: LilyGo T5S3
+            asset: firmware-lilygo.bin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      # terser minifies the inline JS in the embedded web pages (see
+      # scripts/build_html.py). Without it the build still succeeds, but the
+      # generated pages are ~17% larger - so CI installs it to match a release.
+      - name: Install web asset tooling
+        run: npm ci
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      # Keyed per env: the C3 and S3 legs pull different toolchain packages, so
+      # a shared key would have the two legs overwriting each other's cache.
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-v2-${{ runner.os }}-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-v2-${{ runner.os }}-${{ matrix.env }}-
+
+      - name: Pin pioarduino core inside the platform penv
+        run: |
+          set -euo pipefail
+          # Envs with custom_sdkconfig / custom_component_remove (every C3 env, via
+          # [firmware_tuned]) run a nested `pio run` from ~/.platformio/penv. Platform
+          # 55.03.311 bootstraps that penv with an open-ended "pioarduino>=6.1.19", which
+          # now resolves to 6.2.0. That core wants tool-scons 4.11.1 where the platform pins
+          # 4.8.1; the two reinstall over each other and SCons loses its package mid-build
+          # ("No module named 'SCons.Tool.FortranCommon'"). Keep the penv core on the same
+          # version as the outer core installed above. Green builds without this only ride
+          # on a restored cache whose penv predates 6.2.0.
+          # See https://github.com/pioarduino/platform-espressif32/issues/529
+          pio pkg install -e ${{ matrix.env }}
+          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
+          ~/.platformio/penv/bin/pio --version
+
+      - name: Build CrossPoint
+        run: |
+          set -euo pipefail
+          pio run -e ${{ matrix.env }} 2>&1 | tee pio.log
+
+      # No second `pio run` in this job, ever. PlatformIO wipes ALL of .pio/build/ when its
+      # project checksum changes, and that checksum includes the list of files under src/. On a
+      # fresh runner the first run generates src/network/html/*.generated.h AFTER the checksum
+      # is taken, so a second run in the same checkout (a benchmark compile used to sit here)
+      # sees new files, deletes the tree, and the upload below finds no firmware.bin.
+
+      # A missing terser is only a warning in build_html.py, so that the build
+      # still works for contributors without node. In CI it must be an error:
+      # silently shipping ~10KB of un-mangled JS is exactly the regression this
+      # tooling exists to prevent.
+      - name: Verify web assets were minified
+        run: |
+          if grep -q "terser not found" pio.log; then
+            echo "::error::terser did not run - embedded web pages are ~17% larger than a release build"
+            exit 1
+          fi
+
+      - name: Extract firmware stats
+        run: |
+          set -euo pipefail
+          ram_line="$(grep -E "RAM:\\s" -m1 pio.log || true)"
+          flash_line="$(grep -E "Flash:\\s" -m1 pio.log || true)"
+          {
+            echo "## Firmware build stats (${{ matrix.label }})"
+            if [ -n "$ram_line" ]; then echo "- ${ram_line}"; else echo "- RAM: not found"; fi
+            if [ -n "$flash_line" ]; then echo "- ${flash_line}"; else echo "- Flash: not found"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Every env builds a file called firmware.bin; copy it to the board's
+      # asset name so the downloaded file says which board it is for. The X3/X4
+      # leg's asset IS firmware.bin, so it needs no copy.
+      - name: Name the release asset
+        run: |
+          if [ "${{ matrix.asset }}" != "firmware.bin" ]; then
+            cp ".pio/build/${{ matrix.env }}/firmware.bin" \
+               ".pio/build/${{ matrix.env }}/${{ matrix.asset }}"
+          fi
+
+      # The web interface is not in the firmware: build_html.py writes it as one
+      # bundle, web-<hash>.bin, which the device fetches from the release or the
+      # user uploads (src/network/WebAssets.h). Every leg builds the same bundle,
+      # because the pages are board-independent and the bundle is
+      # byte-reproducible, so the merged download holds one copy for all boards.
+      - name: Check the web bundle
+        run: |
+          set -euo pipefail
+          count=$(ls .pio/build/${{ matrix.env }}/web-*.bin 2>/dev/null | wc -l)
+          if [ "$count" != "1" ]; then
+            echo "::error::expected one web-*.bin in .pio/build/${{ matrix.env }}, found $count"
+            exit 1
+          fi
+
+      - name: Upload ${{ matrix.asset }} artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            .pio/build/${{ matrix.env }}/${{ matrix.asset }}
+            .pio/build/${{ matrix.env }}/web-*.bin
+          if-no-files-found: error
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Cache googletest source
+        uses: actions/cache@v4
+        with:
+          path: build/test/_deps/googletest-src
+          key: ${{ runner.os }}-googletest-${{ hashFiles('test/CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/test
+
+      - name: Run tests
+        run: ctest --test-dir build/test --output-on-failure -j
+
+  # The web pages' scripts that can run outside a browser: test/web/*_test.mjs, each given a folder
+  # with jsdom and jszip (pinned here, not added to the repository).
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install the test libraries
+        run: npm install --prefix "$RUNNER_TEMP/web-deps" --no-save --no-audit --no-fund jsdom@24.1.3 jszip@3.10.1
+
+      - name: Run the tests
+        run: |
+          status=0
+          for t in test/web/*_test.mjs; do
+            echo "== $t"
+            node "$t" "$RUNNER_TEMP/web-deps" || status=1
+          done
+          exit $status
+
+  # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
+  # PR requirements.
+  test-status:
+    name: Test Status
+    needs:
+      - build
+      - unit-tests
+      - web-tests
+      - clang-format
+      - cppcheck
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail because needed jobs failed
+        # Fail if any job failed or was cancelled (skipped jobs are ok)
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
+      - name: Success
+        run: exit 0

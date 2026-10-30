@@ -1,0 +1,730 @@
+#include "TxtReaderActivity.h"
+
+#include <FontCacheManager.h>
+#include <GfxRenderer.h>
+#include <HalStorage.h>
+#include <I18n.h>
+#include <Serialization.h>
+#include <Utf8.h>
+
+#include <algorithm>
+
+#include "CrossPointSettings.h"
+#include "CrossPointState.h"
+#include "GlobalBookmarkIndex.h"
+#include "MappedInputManager.h"
+#include "ReaderUtils.h"
+#include "ReadingSessionTracker.h"
+#include "StarredPagesActivity.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+namespace {
+constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
+// Cache file magic and version
+constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
+constexpr uint8_t CACHE_VERSION = 2;          // Increment when cache format changes
+constexpr uint32_t MAX_CACHE_PAGES = 65535;   // Sanity cap to prevent unbounded reserve()
+
+// Parses and word-wraps lines from a file chunk into outLines.
+// Returns the number of bytes consumed from the start of buffer.
+size_t parseAndWrapLines(const uint8_t* buffer, size_t chunkSize, size_t fileOffset, size_t fileSize, int linesPerPage,
+                         GfxRenderer& renderer, int fontId, int vw, std::vector<std::string>& outLines) {
+  size_t pos = 0;
+  while (pos < chunkSize && static_cast<int>(outLines.size()) < linesPerPage) {
+    size_t lineEnd = pos;
+    while (lineEnd < chunkSize && buffer[lineEnd] != '\n') lineEnd++;
+    bool lineComplete = (lineEnd < chunkSize) || (fileOffset + lineEnd >= fileSize);
+    if (!lineComplete && !outLines.empty()) break;
+
+    size_t lineContentLen = lineEnd - pos;
+    bool hasCR = (lineContentLen > 0 && buffer[pos + lineContentLen - 1] == '\r');
+    size_t displayLen = hasCR ? lineContentLen - 1 : lineContentLen;
+    std::string line(reinterpret_cast<const char*>(buffer + pos), displayLen);
+    size_t lineBytePos = 0;
+
+    if (!line.empty()) {
+      renderer.ensureFontReady(fontId, line.c_str());
+    }
+
+    while (!line.empty() && static_cast<int>(outLines.size()) < linesPerPage) {
+      if (renderer.getTextWidth(fontId, line.c_str()) <= vw) {
+        outLines.push_back(line);
+        lineBytePos = displayLen;
+        line.clear();
+        break;
+      }
+      size_t breakPos = line.length();
+      while (breakPos > 0 && renderer.getTextWidth(fontId, line.substr(0, breakPos).c_str()) > vw) {
+        size_t spacePos = line.rfind(' ', breakPos - 1);
+        if (spacePos != std::string::npos && spacePos > 0) {
+          breakPos = spacePos;
+        } else {
+          breakPos--;
+          while (breakPos > 0 && (line[breakPos] & 0xC0) == 0x80) breakPos--;
+        }
+      }
+      if (breakPos == 0) {
+        breakPos = 1;
+        while (breakPos < line.length() && (line[breakPos] & 0xC0) == 0x80) breakPos++;
+      }
+      outLines.push_back(line.substr(0, breakPos));
+      size_t skipChars = breakPos;
+      if (breakPos < line.length() && line[breakPos] == ' ') skipChars++;
+      lineBytePos += skipChars;
+      line = line.substr(skipChars);
+    }
+
+    if (line.empty()) {
+      pos = lineEnd + 1;
+    } else {
+      pos = pos + lineBytePos;
+      break;
+    }
+  }
+  if (pos == 0 && !outLines.empty()) {
+    pos = 1;
+  }
+  return pos;
+}
+}  // namespace
+
+void TxtReaderActivity::onReaderEnter() {
+  applyPendingBookmarkJump();
+  bookmarkStore.load(txt->getCachePath());
+}
+
+void TxtReaderActivity::onReaderExit() {
+  bookmarkStore.save();
+  if (txt) {
+    GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, txt->getPath(), txt->getCachePath(), txt->getTitle(), true);
+  }
+  currentPageLines.clear();
+}
+
+bool TxtReaderActivity::onConfirmShortPress() {
+  if (bookmarkStore.isEmpty()) {
+    return false;
+  }
+  ReaderUtils::enforceExitFullRefresh(renderer);
+  startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const auto& starred = std::get<StarredPageResult>(result.data);
+                             currentPage = starred.pageNumber;
+                             if (currentPage >= totalPages) currentPage = totalPages - 1;
+                             if (currentPage < 0) currentPage = 0;
+                           }
+                           requestUpdate();
+                         });
+  return true;
+}
+
+void TxtReaderActivity::initializeReader() {
+  if (initialized) {
+    return;
+  }
+
+  computeViewportLayout();
+
+  // Try to load cached page index first
+  if (!loadPageIndexCache()) {
+    // Cache not found, build page index
+    buildPageIndex();
+    // Save to cache for next time
+    savePageIndexCache();
+  }
+
+  // Load saved progress
+  loadProgress();
+
+  initialized = true;
+}
+
+void TxtReaderActivity::buildPageIndex() {
+  pageOffsets.clear();
+  pageOffsets.push_back(0);  // First page starts at offset 0
+
+  size_t offset = 0;
+  const size_t fileSize = txt->getFileSize();
+
+  LOG_DBG("TRS", "Building page index for %zu bytes...", fileSize);
+
+  GUI.drawPopup(renderer, tr(STR_INDEXING));  // overlays the displayed frame (drawPopup resyncs the write buffer)
+
+  while (offset < fileSize) {
+    std::vector<std::string> tempLines;
+    size_t nextOffset = offset;
+
+    if (!loadPageAtOffset(offset, tempLines, nextOffset)) {
+      break;
+    }
+
+    if (nextOffset <= offset) {
+      // No progress made, avoid infinite loop
+      break;
+    }
+
+    offset = nextOffset;
+    if (offset < fileSize) {
+      pageOffsets.push_back(offset);
+    }
+
+    // Yield to other tasks periodically
+    if (pageOffsets.size() % 20 == 0) {
+      vTaskDelay(1);
+    }
+  }
+
+  totalPages = pageOffsets.size();
+  LOG_DBG("TRS", "Built page index: %d pages", totalPages);
+}
+
+bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>& outLines, size_t& nextOffset) {
+  outLines.clear();
+  const size_t fileSize = txt->getFileSize();
+
+  if (offset >= fileSize) {
+    return false;
+  }
+
+  // Read a chunk from file
+  size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
+  auto* buffer = static_cast<uint8_t*>(malloc(chunkSize + 1));
+  if (!buffer) {
+    LOG_ERR("TRS", "Failed to allocate %zu bytes", chunkSize);
+    return false;
+  }
+
+  if (!txt->readContent(buffer, offset, chunkSize)) {
+    free(buffer);
+    return false;
+  }
+  buffer[chunkSize] = '\0';
+
+  size_t pos = parseAndWrapLines(buffer, chunkSize, offset, fileSize, linesPerPage, renderer, cachedFontId,
+                                 viewportWidth, outLines);
+  nextOffset = offset + pos;
+  if (nextOffset > fileSize) {
+    nextOffset = fileSize;
+  }
+
+  free(buffer);
+
+  return !outLines.empty();
+}
+
+void TxtReaderActivity::render(RenderLock&&) {
+  if (!txt) {
+    return;
+  }
+
+  // Initialize reader if not done
+  if (!initialized) {
+    initializeReader();
+  }
+
+  if (pageOffsets.empty()) {
+    renderer.clearScreen();
+    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);
+    renderer.displayBuffer();
+    return;
+  }
+
+  // Bounds check
+  if (currentPage < 0) currentPage = 0;
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+
+  // Load current page content
+  size_t offset = pageOffsets[currentPage];
+  size_t nextOffset;
+  currentPageLines.clear();
+  loadPageAtOffset(offset, currentPageLines, nextOffset);
+
+  renderer.clearScreen();
+  renderPage();
+
+  // Save progress
+  saveProgress();
+}
+
+void TxtReaderActivity::renderPage() {
+  const int lineHeight = renderer.getLineHeight(cachedFontId);
+  const int contentWidth = viewportWidth;
+
+  // Render text lines with alignment
+  auto renderLines = [&]() {
+    int y = cachedOrientedMarginTop;
+    for (const auto& line : currentPageLines) {
+      if (!line.empty()) {
+        int x = cachedOrientedMarginLeft;
+
+        // Apply text alignment
+        switch (cachedParagraphAlignment) {
+          case CrossPointSettings::LEFT_ALIGN:
+          default:
+            // x already set to left margin
+            break;
+          case CrossPointSettings::CENTER_ALIGN: {
+            int textWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+            x = cachedOrientedMarginLeft + (contentWidth - textWidth) / 2;
+            break;
+          }
+          case CrossPointSettings::RIGHT_ALIGN: {
+            int textWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+            x = cachedOrientedMarginLeft + contentWidth - textWidth;
+            break;
+          }
+          case CrossPointSettings::JUSTIFIED:
+            // For plain text, justified is treated as left-aligned
+            // (true justification would require word spacing adjustments)
+            break;
+        }
+
+        renderer.drawText(cachedFontId, x, y, line.c_str());
+      }
+      y += lineHeight;
+    }
+  };
+
+  // Font prewarm: scan pass accumulates text, then prewarm, then real render
+  auto* fcm = renderer.getFontCacheManager();
+  auto scope = fcm->createPrewarmScope();
+  renderLines();  // scan pass — text accumulated, no drawing
+  scope.endScanAndPrewarm();
+
+  // BW rendering
+  renderLines();
+  renderStatusBar();
+
+  ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+
+  if (SETTINGS.textAntiAliasing) {
+    // Same AA pass as EpubReaderActivity: displayBuffer() above ended with
+    // swapBuffers(), so the write framebuffer now holds the stale previous
+    // frame. renderGrayscalePlanesSequential() reseeds the controller baseline
+    // from frameBufferActive (the just-displayed page); snapshotting/restoring
+    // the write framebuffer instead would diff the next fast refresh against
+    // the previous page and ghost heavily.
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    // Never aborts: the navigation-preempt gate is currently EPUB-only (see
+    // EpubReaderActivity::aaPreemptedByNavigation), so this pass keeps its previous behaviour.
+    renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); }, [] { return false; });
+  }
+  // scope destructor clears font cache via FontCacheManager
+}
+
+void TxtReaderActivity::renderStatusBar() const {
+  const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
+  std::string title;
+  if (SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE) {
+    title = txt->getTitle();
+  }
+  const bool isStarred = bookmarkStore.has(0, static_cast<uint16_t>(currentPage));
+  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title, 0, isStarred, std::string(), true, false,
+                    SyncIndicator::None, currentPage + 1, totalPages);
+
+  noteStatusBarRendered();
+}
+
+void TxtReaderActivity::applyPendingBookmarkJump() {
+  auto& jump = APP_STATE.pendingBookmarkJump;
+  if (!jump.active || !txt || jump.bookPath != txt->getPath()) {
+    return;
+  }
+  LOG_DBG("TRS", "Applying pending bookmark jump: page=%u", jump.pageNumber);
+
+  bool persisted = false;
+  FsFile f;
+  if (Storage.openFileForWrite("TRS", txt->getCachePath() + "/progress.bin", f)) {
+    uint8_t data[6] = {0};
+    data[0] = jump.pageNumber & 0xFF;
+    data[1] = (jump.pageNumber >> 8) & 0xFF;
+    // Offset bytes stay 0: loadProgress reads only the page, and the lazy
+    // initializeReader() rebuilds the page index on first render anyway.
+    if (f.write(data, 6) == 6) {
+      persisted = f.close();
+    } else {
+      f.close();
+    }
+  }
+
+  if (persisted) {
+    jump.clear();
+    APP_STATE.saveToFile();
+  }
+}
+
+bool TxtReaderActivity::loadPageIndexCache() {
+  // Cache file format (using serialization module):
+  // - uint32_t: magic "TXTI"
+  // - uint8_t: cache version
+  // - uint32_t: file size (to validate cache)
+  // - int32_t: viewport width
+  // - int32_t: lines per page
+  // - int32_t: font ID (to invalidate cache on font change)
+  // - int32_t: screen margin (to invalidate cache on margin change)
+  // - uint8_t: paragraph alignment (to invalidate cache on alignment change)
+  // - uint32_t: total pages count
+  // - N * uint32_t: page offsets
+
+  std::string cachePath = txt->getCachePath() + "/index.bin";
+  FsFile f;
+  if (!Storage.openFileForRead("TRS", cachePath, f)) {
+    LOG_DBG("TRS", "No page index cache found");
+    return false;
+  }
+
+  // Read and validate header using serialization module
+  uint32_t magic;
+  serialization::readPod(f, magic);
+  if (magic != CACHE_MAGIC) {
+    LOG_DBG("TRS", "Cache magic mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  uint8_t version;
+  serialization::readPod(f, version);
+  if (version != CACHE_VERSION) {
+    LOG_DBG("TRS", "Cache version mismatch (%d != %d), rebuilding", version, CACHE_VERSION);
+    f.close();
+    return false;
+  }
+
+  uint32_t fileSize;
+  serialization::readPod(f, fileSize);
+  if (fileSize != txt->getFileSize()) {
+    LOG_DBG("TRS", "Cache file size mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  int32_t cachedWidth;
+  serialization::readPod(f, cachedWidth);
+  if (cachedWidth != viewportWidth) {
+    LOG_DBG("TRS", "Cache viewport width mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  int32_t cachedLines;
+  serialization::readPod(f, cachedLines);
+  if (cachedLines != linesPerPage) {
+    LOG_DBG("TRS", "Cache lines per page mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  int32_t fontId;
+  serialization::readPod(f, fontId);
+  if (fontId != cachedFontId) {
+    LOG_DBG("TRS", "Cache font ID mismatch (%d != %d), rebuilding", fontId, cachedFontId);
+    f.close();
+    return false;
+  }
+
+  int32_t margin;
+  serialization::readPod(f, margin);
+  if (margin != cachedScreenMargin) {
+    LOG_DBG("TRS", "Cache screen margin mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  uint8_t alignment;
+  serialization::readPod(f, alignment);
+  if (alignment != cachedParagraphAlignment) {
+    LOG_DBG("TRS", "Cache paragraph alignment mismatch, rebuilding");
+    f.close();
+    return false;
+  }
+
+  uint32_t numPages;
+  serialization::readPod(f, numPages);
+  if (numPages > MAX_CACHE_PAGES) {
+    LOG_ERR("TRS", "Cache numPages %u exceeds cap %u, cache invalid", numPages, MAX_CACHE_PAGES);
+    f.close();
+    return false;
+  }
+
+  // Read page offsets
+  pageOffsets.clear();
+  pageOffsets.reserve(numPages);
+
+  for (uint32_t i = 0; i < numPages; i++) {
+    uint32_t offset;
+    serialization::readPod(f, offset);
+    pageOffsets.push_back(offset);
+  }
+
+  f.close();
+  totalPages = pageOffsets.size();
+  LOG_DBG("TRS", "Loaded page index cache: %d pages", totalPages);
+  return true;
+}
+
+void TxtReaderActivity::savePageIndexCache() const {
+  std::string cachePath = txt->getCachePath() + "/index.bin";
+  FsFile f;
+  if (!Storage.openFileForWrite("TRS", cachePath, f)) {
+    LOG_ERR("TRS", "Failed to save page index cache");
+    return;
+  }
+
+  // Write header using serialization module
+  serialization::writePod(f, CACHE_MAGIC);
+  serialization::writePod(f, CACHE_VERSION);
+  serialization::writePod(f, static_cast<uint32_t>(txt->getFileSize()));
+  serialization::writePod(f, static_cast<int32_t>(viewportWidth));
+  serialization::writePod(f, static_cast<int32_t>(linesPerPage));
+  serialization::writePod(f, static_cast<int32_t>(cachedFontId));
+  serialization::writePod(f, static_cast<int32_t>(cachedScreenMargin));
+  serialization::writePod(f, cachedParagraphAlignment);
+  serialization::writePod(f, static_cast<uint32_t>(pageOffsets.size()));
+
+  // Write page offsets
+  for (size_t offset : pageOffsets) {
+    serialization::writePod(f, static_cast<uint32_t>(offset));
+  }
+
+  f.close();
+  LOG_DBG("TRS", "Saved page index cache: %d pages", totalPages);
+}
+
+bool TxtReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, GfxRenderer& renderer) {
+  Txt txt(filePath, "/.crosspoint");
+  if (!txt.load()) {
+    LOG_DBG("SLP", "TXT: failed to load %s", filePath.c_str());
+    return false;
+  }
+
+  // Apply the reader orientation so margins match what the reader would produce
+  ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+
+  // Compute layout values that match what computeViewportLayout() produces
+  const int fontId = SETTINGS.getTxtReaderFontId();
+  const uint8_t screenMargin = SETTINGS.screenMargin;
+  const uint8_t paragraphAlignment = SETTINGS.paragraphAlignment;
+
+  const TextLayout layout = computeTextLayout(renderer, fontId, screenMargin);
+  const int vw = layout.viewportWidth;
+  const int lineHeight = renderer.getLineHeight(fontId);
+  const int linesPerPage = layout.linesPerPage;
+
+  // Step 1: Try to read the saved page and its file offset from progress.bin.
+  // The 6-byte format (written by saveProgress) stores: page(2) + offset(4).
+  // This lets us skip index.bin entirely, so the overlay works even when the
+  // page index cache is missing or stale (e.g. after a firmware update).
+  int savedPage = 0;
+  size_t savedOffset = 0;
+  bool offsetKnown = false;
+  {
+    FsFile progFile;
+    if (Storage.openFileForRead("SLP", txt.getCachePath() + "/progress.bin", progFile)) {
+      uint8_t data[6] = {0};
+      const int n = progFile.read(data, 6);
+      progFile.close();
+      if (n >= 2) {
+        savedPage = (int)((uint32_t)data[0] | ((uint32_t)data[1] << 8));
+      }
+      if (n >= 6) {
+        const uint32_t off =
+            (uint32_t)data[2] | ((uint32_t)data[3] << 8) | ((uint32_t)data[4] << 16) | ((uint32_t)data[5] << 24);
+        if (off < txt.getFileSize()) {
+          savedOffset = off;
+          offsetKnown = true;
+        }
+      }
+    }
+  }
+
+  // Step 2: If progress.bin didn't provide the offset, fall back to index.bin.
+  if (!offsetKnown) {
+    std::string cachePath = txt.getCachePath() + "/index.bin";
+    FsFile cacheFile;
+    if (Storage.openFileForRead("SLP", cachePath, cacheFile)) {
+      uint32_t magic;
+      serialization::readPod(cacheFile, magic);
+      uint8_t version;
+      serialization::readPod(cacheFile, version);
+      uint32_t cachedFileSize;
+      serialization::readPod(cacheFile, cachedFileSize);
+      int32_t cachedVw, cachedLpp, cachedFontId, cachedMargin;
+      serialization::readPod(cacheFile, cachedVw);
+      serialization::readPod(cacheFile, cachedLpp);
+      serialization::readPod(cacheFile, cachedFontId);
+      serialization::readPod(cacheFile, cachedMargin);
+      uint8_t cachedAlignment;
+      serialization::readPod(cacheFile, cachedAlignment);
+      uint32_t numPages;
+      serialization::readPod(cacheFile, numPages);
+
+      if (magic == CACHE_MAGIC && version == CACHE_VERSION && cachedFileSize == txt.getFileSize() && cachedVw == vw &&
+          cachedLpp == linesPerPage && cachedFontId == fontId && cachedMargin == screenMargin &&
+          cachedAlignment == paragraphAlignment && numPages > 0 && numPages <= MAX_CACHE_PAGES) {
+        if (savedPage < 0 || savedPage >= static_cast<int>(numPages)) savedPage = 0;
+        for (uint32_t i = 0; i < numPages; i++) {
+          uint32_t off;
+          serialization::readPod(cacheFile, off);
+          if (static_cast<int>(i) == savedPage) {
+            if (off < txt.getFileSize()) {
+              savedOffset = off;
+              offsetKnown = true;
+            } else {
+              LOG_DBG("SLP", "TXT: index.bin offset %u out of range (fileSize=%u), ignoring", off, txt.getFileSize());
+            }
+          }
+        }
+      } else {
+        LOG_DBG("SLP", "TXT: index cache invalid or stale");
+      }
+      cacheFile.close();
+    }
+
+    // Step 3: No valid cache at all — render from the start of the file as a last resort.
+    // This shows page 1 rather than a blank screen, which is always preferable.
+    if (!offsetKnown) {
+      LOG_DBG("SLP", "TXT: no valid cache, falling back to start of file");
+      savedOffset = 0;
+    }
+  }
+
+  // Load the page lines from file
+  std::vector<std::string> pageLines;
+  const size_t fileSize = txt.getFileSize();
+  size_t offset = savedOffset;
+  if (offset >= fileSize) {
+    LOG_DBG("SLP", "TXT: page offset out of bounds");
+    return false;
+  }
+
+  size_t chunkSize = std::min(CHUNK_SIZE, fileSize - offset);
+  auto* buffer = static_cast<uint8_t*>(malloc(chunkSize + 1));
+  if (!buffer) return false;
+
+  if (!txt.readContent(buffer, offset, chunkSize)) {
+    free(buffer);
+    return false;
+  }
+  buffer[chunkSize] = '\0';
+
+  parseAndWrapLines(buffer, chunkSize, offset, fileSize, linesPerPage, renderer, fontId, vw, pageLines);
+  free(buffer);
+
+  if (pageLines.empty()) return false;
+
+  // Render lines to frame buffer (no displayBuffer call)
+  renderer.clearScreen();
+  int y = layout.marginTop;
+  for (const auto& line : pageLines) {
+    if (!line.empty()) {
+      int x = layout.marginLeft;
+      switch (paragraphAlignment) {
+        case CrossPointSettings::CENTER_ALIGN:
+          x = layout.marginLeft + (vw - renderer.getTextWidth(fontId, line.c_str())) / 2;
+          break;
+        case CrossPointSettings::RIGHT_ALIGN:
+          x = layout.marginLeft + vw - renderer.getTextWidth(fontId, line.c_str());
+          break;
+        default:
+          break;
+      }
+      renderer.drawText(fontId, x, y, line.c_str());
+    }
+    y += lineHeight;
+  }
+  return true;
+}
+
+void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION action) {
+  using BA = CrossPointSettings::BUTTON_ACTION;
+  auto clampPage = [this]() {
+    if (currentPage < 0) currentPage = 0;
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
+  };
+  switch (action) {
+    case BA::BTN_PAGE_FORWARD:
+      if (currentPage < totalPages - 1) {
+        currentPage++;
+        globalReadingSessionTracker().onPageTurn();
+        requestUpdate();
+      }
+      break;
+    case BA::BTN_PAGE_BACK:
+      if (currentPage > 0) {
+        currentPage--;
+        globalReadingSessionTracker().onPageTurn();
+        requestUpdate();
+      }
+      break;
+    case BA::BTN_PAGE_FORWARD_10: {
+      const int prevPage = currentPage;
+      currentPage += 10;
+      clampPage();
+      // cppcheck-suppress knownConditionTrueFalse
+      if (currentPage != prevPage) {
+        globalReadingSessionTracker().onPageTurn();
+      }
+      requestUpdate();
+      break;
+    }
+    case BA::BTN_PAGE_BACK_10: {
+      const int prevPage = currentPage;
+      currentPage -= 10;
+      clampPage();
+      // cppcheck-suppress knownConditionTrueFalse
+      if (currentPage != prevPage) {
+        globalReadingSessionTracker().onPageTurn();
+      }
+      requestUpdate();
+      break;
+    }
+    case BA::BTN_STAR_PAGE:
+      bookmarkStore.toggle(0, static_cast<uint16_t>(currentPage));
+      requestUpdate();
+      break;
+    case BA::BTN_OPEN_BOOKMARKS:
+      if (!bookmarkStore.isEmpty()) {
+        ReaderUtils::enforceExitFullRefresh(renderer);
+        startActivityForResult(std::make_unique<StarredPagesActivity>(renderer, mappedInput, bookmarkStore),
+                               [this](const ActivityResult& result) {
+                                 if (!result.isCancelled) {
+                                   const auto& starred = std::get<StarredPageResult>(result.data);
+                                   currentPage = starred.pageNumber;
+                                   requestUpdate();
+                                 }
+                               });
+      }
+      break;
+    case BA::BTN_NEXT_SECTION:
+    case BA::BTN_PREV_SECTION:
+      // TXT files have no headings/chapters; treat as unsupported (no-op).
+      break;
+    case BA::BTN_EXIT_READER:
+      ReaderUtils::enforceExitFullRefresh(renderer);
+      finish();
+      break;
+    case BA::BTN_CYCLE_ORIENTATION: {
+      const uint8_t nextOrientation =
+          static_cast<uint8_t>((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
+      SETTINGS.orientation = nextOrientation;
+      SETTINGS.saveToFile();
+      {
+        // This runs on the loop task, while the render task reads the renderer's orientation
+        // and pageOffsets on every pass. Rebuilding the index here, unlocked, cleared and
+        // refilled the vector under a render that was indexing it. The lock covers the two
+        // writes; the rebuild itself is left to render(), which runs initializeReader() under
+        // the lock it already holds whenever `initialized` is false -- so the slow part does
+        // not hold up this task, and nothing reads a half-built index.
+        RenderLock lock(*this);
+        ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+        initialized = false;
+      }
+      requestUpdate();
+      break;
+    }
+    default:
+      break;
+  }
+}

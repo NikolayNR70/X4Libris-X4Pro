@@ -1,0 +1,163 @@
+#include "StarredPagesActivity.h"
+
+#include <GfxRenderer.h>
+#include <I18n.h>
+
+#include "MappedInputManager.h"
+#include "activities/util/KeyboardEntryActivity.h"
+#include "components/UITheme.h"
+#include "fontIds.h"
+
+std::string StarredPagesActivity::getDefaultLabel(int index) const {
+  const auto& bm = bookmarkStore.getAll()[index];
+  char buf[64];
+  if (epub) {
+    const int tocIndex = epub->getTocIndexForSpineIndex(bm.spineIndex);
+    if (tocIndex != -1) {
+      const auto tocItem = epub->getTocItem(tocIndex);
+      return tocItem.title + " - " + tr(STR_PAGE_PREFIX) + std::to_string(bm.pageNumber + 1);
+    }
+    snprintf(buf, sizeof(buf), "%s%d, %s%d", tr(STR_SECTION_PREFIX), bm.spineIndex + 1, tr(STR_PAGE_PREFIX),
+             bm.pageNumber + 1);
+  } else {
+    snprintf(buf, sizeof(buf), "%s%d", tr(STR_PAGE_PREFIX), bm.pageNumber + 1);
+  }
+  return std::string(buf);
+}
+
+std::string StarredPagesActivity::getItemLabel(int index) const {
+  char prefix[16];
+  snprintf(prefix, sizeof(prefix), "%d. ", index + 1);
+  const auto& bm = bookmarkStore.getAll()[index];
+  return std::string(prefix) + (bm.name.empty() ? getDefaultLabel(index) : bm.name);
+}
+
+void StarredPagesActivity::onEnter() {
+  Activity::onEnter();
+  requestUpdate();
+}
+
+void StarredPagesActivity::onExit() {
+  bookmarkStore.save();
+  Activity::onExit();
+}
+
+void StarredPagesActivity::startRename() {
+  const auto& all = bookmarkStore.getAll();
+  if (all.empty() || selectorIndex >= static_cast<int>(all.size())) return;
+  const int renamingIndex = selectorIndex;
+  const std::string initial =
+      all[renamingIndex].name.empty() ? getDefaultLabel(renamingIndex) : all[renamingIndex].name;
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), initial,
+                                                                 BookmarkStore::MAX_NAME_LENGTH, InputType::Text),
+                         [this, renamingIndex](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const auto& kr = std::get<KeyboardResult>(result.data);
+                             bookmarkStore.rename(renamingIndex, kr.text);
+                           }
+                           requestUpdate();
+                         });
+}
+
+void StarredPagesActivity::deleteSelected() {
+  const auto& all = bookmarkStore.getAll();
+  if (all.empty() || selectorIndex >= static_cast<int>(all.size())) return;
+  bookmarkStore.removeAt(selectorIndex);
+  const int remaining = static_cast<int>(bookmarkStore.getAll().size());
+  if (remaining == 0) {
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+    return;
+  }
+  if (selectorIndex >= remaining) selectorIndex = remaining - 1;
+  requestUpdate();
+}
+
+void StarredPagesActivity::loop() {
+  const int totalItems = static_cast<int>(bookmarkStore.getAll().size());
+
+  ButtonEventManager::ButtonEvent ev;
+  while (buttonEvents.consumeEvent(ev)) {
+    if (ev.button == MappedInputManager::Button::Back && ev.type == ButtonEventManager::PressType::Short) {
+      ActivityResult result;
+      result.isCancelled = true;
+      setResult(std::move(result));
+      finish();
+      return;
+    }
+
+    if (totalItems > 0 && ev.button == MappedInputManager::Button::Confirm &&
+        ev.type == ButtonEventManager::PressType::Short) {
+      const auto& bm = bookmarkStore.getAll()[selectorIndex];
+      setResult(StarredPageResult{bm.spineIndex, bm.pageNumber});
+      finish();
+      return;
+    }
+
+    // Logical Left/Right only, matching the hints this screen draws (Rename / Delete). They are
+    // the front strip in portrait and the side buttons in landscape, and drawn wherever they land
+    // — but never the pair that scrolls the list, which is what matters here: the PageBack/
+    // PageForward names that used to be matched instead are the SIDE buttons under another name
+    // (see ButtonEventManager's aliasing note), so pressing Up to move the selection also opened
+    // the rename keyboard.
+    if (totalItems > 0 && MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
+        ev.type == ButtonEventManager::PressType::Short) {
+      startRename();
+      return;
+    }
+
+    if (totalItems > 0 && MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
+        ev.type == ButtonEventManager::PressType::Short) {
+      deleteSelected();
+      return;
+    }
+  }
+
+  if (totalItems == 0) return;
+
+  // Step on logical Up/Down only: logical Left/Right are this screen's rename and delete (handled
+  // above), so they cannot also drive the list — binding them here made a single press both move
+  // the selection and fire the action. The page jump is the double-click on Up/Down.
+  buttonNavigator.onNextList(ButtonNavigator::getStepNextButtons(), selectorIndex, totalItems,
+                             [this] { requestUpdate(); });
+  buttonNavigator.onPreviousList(ButtonNavigator::getStepPreviousButtons(), selectorIndex, totalItems,
+                                 [this] { requestUpdate(); });
+}
+
+void StarredPagesActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_STARRED_PAGES));
+
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
+
+  const int totalItems = static_cast<int>(bookmarkStore.getAll().size());
+
+  if (totalItems == 0) {
+    renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20,
+                      tr(STR_NO_STARRED_PAGES));
+  } else {
+    GUI.drawList(renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, totalItems, selectorIndex,
+                 [this](int index) { return getItemLabel(index); });
+  }
+
+  const bool hasItems = totalItems > 0;
+  const auto hints = mappedInput.mapHints(tr(STR_BACK), hasItems ? tr(STR_SELECT) : "", hasItems ? tr(STR_RENAME) : "",
+                                          hasItems ? tr(STR_DELETE) : "", tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
+  GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
+
+  renderer.displayBuffer();
+}
+
+ListRowTap::Result StarredPagesActivity::selectListRow(const int index) {
+  return ListRowTap::apply(index, static_cast<int>(bookmarkStore.getAll().size()), selectorIndex);
+}
+
+bool StarredPagesActivity::pageList(ListPageDirection /*direction*/) { return true; }

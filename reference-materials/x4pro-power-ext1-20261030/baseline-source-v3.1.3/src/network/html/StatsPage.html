@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--#include file="shared/ThemeInit.html.inc" -->
+  <title>Reading Stats - %%CROSSPOINT%%</title>
+  <style>
+    <!--#include file="shared/Theme.css.inc" -->
+    <!--#include file="shared/NavLinks.css.inc" -->
+
+    /* All time and the 30-day chart side by side; one column on a narrow screen. */
+    .stats-top {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .stats-top .card { margin: 0; min-width: 0; }
+
+    /* 4-cell stat grid: mirrors the on-device card */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .grid > div { text-align: center; padding: 12px 4px; min-width: 0; }
+    .grid > div + div { border-left: 1px solid var(--border); }
+    .grid .value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--text-strong);
+      font-variant-numeric: tabular-nums;
+    }
+    .grid .label { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+
+    .info-list { margin-top: 10px; }
+
+    /* The 30-day chart grows to the height of the card beside it. */
+    .chart-card { display: flex; flex-direction: column; }
+    .chart-host { flex: 1; display: flex; flex-direction: column; }
+    .chart-host .sparkline { flex: 1; }
+
+    /* Sparkline */
+    .sparkline {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 80px;
+      min-height: 80px;
+      margin-top: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sparkline .bar {
+      flex: 1;
+      background: var(--accent);
+      min-height: 2px;
+      border-radius: 2px 2px 0 0;
+    }
+    /* Not "empty": the theme has an .empty class for empty states. */
+    .sparkline .bar.no-reading { background: var(--border); min-height: 1px; }
+    .sparkline-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Books table */
+    .books-card { padding-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+    th:first-child, td:first-child { padding-left: 0; }
+    th:last-child, td:last-child { padding-right: 0; }
+    th {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover, th.sorted-asc, th.sorted-desc { color: var(--text-strong); }
+    th.sorted-asc::after { content: " \25B2"; font-size: 0.7em; }
+    th.sorted-desc::after { content: " \25BC"; font-size: 0.7em; }
+    tbody tr:last-child td { border-bottom: none; }
+    td { overflow-wrap: anywhere; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .finished-mark { color: var(--accent-text); font-weight: 700; margin-right: 6px; }
+
+    tr.book-row { cursor: pointer; }
+    tr.book-row:hover td { background: var(--surface-2); }
+    .book-detail > td { background: var(--surface-2); padding: 16px; border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+    .book-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+      gap: 0 24px;
+    }
+    .book-detail-grid > div {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .book-detail-grid .label { color: var(--text-muted); }
+    .book-detail-grid span:last-child { color: var(--text-strong); font-weight: 500; text-align: right; }
+    .remove-book { margin-top: 14px; }
+
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    /* Narrow screens: the last two columns go; a book's row opens to show them. */
+    @media (max-width: 560px) {
+      .col-extra { display: none; }
+      .grid .value { font-size: 1.35rem; }
+    }
+  </style>
+</head>
+
+<body>
+  <!--#include file="shared/PageHeader.html.inc" -->
+
+  <main class="page">
+    <div class="page-head">
+      <h1>Reading Stats</h1>
+      <p class="page-intro">Time spent reading on this device, in total and per book. Open a book's row for its details.</p>
+    </div>
+
+    <div id="content">
+      <section class="card">
+        <p class="empty">Loading…</p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // Format a number of seconds as "1h 23m" / "23m 45s" / "12s" — matches
+    // the on-device format so the dashboard reads as the same product.
+    function formatDuration(seconds) {
+      if (!seconds) return "0s";
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+      if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
+      return `${s}s`;
+    }
+
+    function formatPagesPerMin(pages, seconds) {
+      if (seconds < 60 || !pages) return "—";
+      return ((pages * 60) / seconds).toFixed(1);
+    }
+
+    // Compact "time-to-finish" rendering. For long projections, "1h 23m" is
+    // less noisy than "1h 23m 45s" — round to the nearest minute and drop the
+    // seconds.
+    function formatEta(seconds) {
+      if (!seconds || seconds <= 0) return "—";
+      let h = Math.floor(seconds / 3600);
+      let m = Math.round((seconds % 3600) / 60);
+      // Rounding can push m to 60 (e.g. 3570s → 0h 60m); carry into hours.
+      if (m === 60) { h += 1; m = 0; }
+      if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
+      if (m > 0) return `${m}m`;
+      return "<1m";
+    }
+
+    // Renders a 30-bar sparkline into `host` for the day window
+    // [todayDayIndex - 29 .. todayDayIndex] using a map of dayIndex → seconds.
+    function renderSparkline(host, daysMap, todayDayIndex, windowSize = 30) {
+      host.innerHTML = "";
+      const bars = document.createElement("div");
+      bars.className = "sparkline";
+
+      let max = 1;
+      const series = [];
+      for (let i = 0; i < windowSize; i++) {
+        const d = todayDayIndex - (windowSize - 1 - i);
+        const sec = d > 0 ? (daysMap[d] || 0) : 0;
+        series.push(sec);
+        if (sec > max) max = sec;
+      }
+      for (const sec of series) {
+        const bar = document.createElement("div");
+        bar.className = sec > 0 ? "bar" : "bar no-reading";
+        bar.style.height = sec > 0 ? `${Math.max(4, (sec / max) * 100)}%` : "2px";
+        bar.title = sec > 0 ? formatDuration(sec) : "no reading";
+        bars.appendChild(bar);
+      }
+      host.appendChild(bars);
+
+      const labels = document.createElement("div");
+      labels.className = "sparkline-labels";
+      labels.innerHTML = `<span>${windowSize} days ago</span><span>today</span>`;
+      host.appendChild(labels);
+    }
+
+    // Format a unix epoch as relative-or-date (matches the on-device formatter).
+    function formatDateOrRelative(epoch) {
+      if (!epoch) return "—";
+      const nowSec = Math.floor(Date.now() / 1000);
+      const delta = nowSec - epoch;
+      if (delta < 60) return "just now";
+      if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
+      if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`;
+      const days = Math.floor(delta / 86400);
+      if (days < 30) return `${days}d ago`;
+      const d = new Date(epoch * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+
+    let currentSort = { col: "totalSeconds", dir: "desc" };
+    let expandedDocId = null;
+
+    function sortBooks(books, col, dir) {
+      const cmp = (a, b) => {
+        let av = a[col], bv = b[col];
+        if (col === "title") {
+          av = (av || a.docId).toLowerCase();
+          bv = (bv || b.docId).toLowerCase();
+          return dir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+        }
+        return dir === "asc" ? av - bv : bv - av;
+      };
+      return [...books].sort(cmp);
+    }
+
+    function render(data) {
+      const content = document.getElementById("content");
+      content.innerHTML = "";
+
+      if (!data || data.totalSeconds === 0) {
+        const empty = document.createElement("section");
+        empty.className = "card";
+        empty.innerHTML = '<p class="empty">No reading recorded yet. Open a book and read for a while — your stats will appear here.</p>';
+        content.appendChild(empty);
+        return;
+      }
+
+      // All time and the 30-day chart share a row on a wide screen.
+      const overview = document.createElement("div");
+      overview.className = "stats-top";
+      content.appendChild(overview);
+
+      // ---- All-time card ----
+      const allTime = document.createElement("section");
+      allTime.className = "card";
+      const curStreak = data.currentStreak != null ? String(data.currentStreak) : "—";
+      const maxStreak = data.longestStreak != null ? String(data.longestStreak) : "—";
+      const finishedRow = (data.finishedBookCount && data.finishedBookCount > 0)
+        ? `<div class="info-row"><span class="label">Finished</span><span class="value">${data.finishedBookCount}</span></div>`
+        : "";
+      allTime.innerHTML = `
+        <h2>All time</h2>
+        <div class="grid">
+          <div><div class="value">${data.totalSessions}</div><div class="label">Sessions</div></div>
+          <div><div class="value">${data.bookCount}</div><div class="label">Books</div></div>
+          <div><div class="value">${curStreak}</div><div class="label">Streak</div></div>
+          <div><div class="value">${maxStreak}</div><div class="label">Longest</div></div>
+        </div>
+        <div class="info-list">
+          <div class="info-row"><span class="label">Total time</span><span class="value">${formatDuration(data.totalSeconds)}</span></div>
+          <div class="info-row"><span class="label">Pages turned</span><span class="value">${data.totalPagesTurned}</span></div>
+          <div class="info-row"><span class="label">Pages/min</span><span class="value">${formatPagesPerMin(data.totalPagesTurned, data.totalSeconds)}</span></div>
+          ${finishedRow}
+        </div>
+      `;
+      overview.appendChild(allTime);
+
+      // ---- Sparkline card ----
+      if (data.todayDayIndex && data.globalDays && data.globalDays.length > 0) {
+        const sparkCard = document.createElement("section");
+        sparkCard.className = "card chart-card";
+        sparkCard.innerHTML = "<h2>Last 30 days</h2><div id=\"global-spark\" class=\"chart-host\"></div>";
+        overview.appendChild(sparkCard);
+        const daysMap = {};
+        for (const [day, sec] of data.globalDays) daysMap[day] = sec;
+        renderSparkline(sparkCard.querySelector("#global-spark"), daysMap, data.todayDayIndex);
+      }
+
+      // ---- Books card ----
+      const booksCard = document.createElement("section");
+      booksCard.className = "card books-card";
+      booksCard.innerHTML = "<h2>Books</h2>";
+      if (!data.books || data.books.length === 0) {
+        booksCard.innerHTML += '<p class="empty">No books tracked yet.</p>';
+        content.appendChild(booksCard);
+      } else {
+        const table = document.createElement("table");
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th data-col="title">Title</th>
+              <th data-col="totalSeconds" class="num">Time</th>
+              <th data-col="progress" class="num">Progress</th>
+              <th data-col="etaSeconds" class="num col-extra">To finish</th>
+              <th data-col="lastReadEpoch" class="num col-extra">Last read</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+        const tbody = table.querySelector("tbody");
+        const sorted = sortBooks(data.books, currentSort.col, currentSort.dir);
+        for (const b of sorted) {
+          const tr = document.createElement("tr");
+          tr.className = "book-row";
+          tr.dataset.docId = b.docId;
+          const finishedMark = b.finishedCount > 0
+            ? `<span title="Finished${b.finishedCount > 1 ? ' ' + b.finishedCount + '×' : ''}" class="finished-mark">✓</span>`
+            : "";
+          const etaCell = b.progress >= 100 ? "done" : formatEta(b.etaSeconds);
+          tr.innerHTML = `
+            <td>${finishedMark}${escapeHtml(b.title || b.docId)}</td>
+            <td class="num">${formatDuration(b.totalSeconds)}</td>
+            <td class="num">${b.progress}%</td>
+            <td class="num col-extra">${etaCell}</td>
+            <td class="num col-extra">${formatDateOrRelative(b.lastReadEpoch)}</td>
+          `;
+          tr.addEventListener("click", () => toggleBookDetail(b, tr, data.todayDayIndex));
+          tbody.appendChild(tr);
+          if (expandedDocId === b.docId) {
+            const detailRow = buildDetailRow(b, data.todayDayIndex);
+            tbody.appendChild(detailRow);
+          }
+        }
+        booksCard.appendChild(table);
+
+        // Header sort
+        table.querySelectorAll("th").forEach(th => {
+          const col = th.dataset.col;
+          if (col === currentSort.col) th.classList.add(`sorted-${currentSort.dir}`);
+          th.addEventListener("click", () => {
+            if (currentSort.col === col) {
+              currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
+            } else {
+              currentSort.col = col;
+              currentSort.dir = col === "title" ? "asc" : "desc";
+            }
+            render(data);
+          });
+        });
+
+        content.appendChild(booksCard);
+      }
+
+      // ---- Actions ----
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      actions.innerHTML = '<a class="btn" href="/api/stats/export" download="reading-stats.json">Download backup</a>';
+      content.appendChild(actions);
+    }
+
+    function buildDetailRow(book, todayDayIndex) {
+      const row = document.createElement("tr");
+      row.className = "book-detail";
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      const avg = book.sessions > 0 ? formatDuration(Math.floor(book.totalSeconds / book.sessions)) : "—";
+      const finishedDetail = book.finishedCount > 0
+        ? `<div><span class="label">Finished</span><span>${book.finishedCount}× — ${formatDateOrRelative(book.lastFinishedEpoch)}</span></div>`
+        : "";
+      const etaDetail = book.progress < 100
+        ? `<div><span class="label">Time to finish</span><span>${formatEta(book.etaSeconds)}</span></div>`
+        : "";
+      cell.innerHTML = `
+        <div class="book-detail-grid">
+          <div><span class="label">Author</span><span>${escapeHtml(book.author || "—")}</span></div>
+          <div><span class="label">Progress</span><span>${book.progress}%</span></div>
+          <div><span class="label">Avg session</span><span>${avg}</span></div>
+          <div><span class="label">Pages/min</span><span>${formatPagesPerMin(book.pagesTurned, book.totalSeconds)}</span></div>
+          <div><span class="label">First read</span><span>${formatDateOrRelative(book.firstReadEpoch)}</span></div>
+          <div><span class="label">Last read</span><span>${formatDateOrRelative(book.lastReadEpoch)}</span></div>
+          ${etaDetail}
+          ${finishedDetail}
+        </div>
+      `;
+      if (todayDayIndex && book.days && book.days.length > 0) {
+        const sparkHost = document.createElement("div");
+        sparkHost.style.marginTop = "12px";
+        const daysMap = {};
+        for (const [day, sec] of book.days) daysMap[day] = sec;
+        renderSparkline(sparkHost, daysMap, todayDayIndex);
+        cell.appendChild(sparkHost);
+      }
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "btn btn-danger btn-small remove-book";
+      removeButton.textContent = "Remove from stats";
+      removeButton.addEventListener("click", () => removeBook(book, removeButton));
+      cell.appendChild(removeButton);
+      row.appendChild(cell);
+      return row;
+    }
+
+    // Same action as the device's per-book stats screen: the book's entry goes and its reading time
+    // comes back out of the totals. The book file is not touched.
+    async function removeBook(book, button) {
+      const name = book.title || book.docId;
+      if (!confirm(`Remove "${name}" from reading stats?
+
+Its reading time is taken out of the totals. The book itself stays on the device.`)) return;
+      button.disabled = true;
+      try {
+        const res = await fetch("/api/stats/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docId: book.docId }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "HTTP " + res.status);
+        }
+        expandedDocId = null;
+        await load();
+      } catch (e) {
+        button.disabled = false;
+        alert("Could not remove the book: " + e.message);
+      }
+    }
+
+    function toggleBookDetail(book, tr, todayDayIndex) {
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains("book-detail")) {
+        next.remove();
+        expandedDocId = null;
+      } else {
+        // Remove any other open detail row
+        document.querySelectorAll("tr.book-detail").forEach(r => r.remove());
+        const detailRow = buildDetailRow(book, todayDayIndex);
+        tr.parentNode.insertBefore(detailRow, tr.nextSibling);
+        expandedDocId = book.docId;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    async function load() {
+      try {
+        const res = await fetch("/api/stats");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        render(data);
+      } catch (e) {
+        const content = document.getElementById("content");
+        content.innerHTML = `<section class="card"><p class="empty">Failed to load stats: ${escapeHtml(e.message)}</p></section>`;
+      }
+    }
+
+    load();
+  </script>
+</body>
+
+</html>
