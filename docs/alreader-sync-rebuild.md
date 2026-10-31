@@ -10,10 +10,12 @@ This document records the isolated `feat/alreader-sync-rebuild-20261031` branch.
 - Simple FB2 with title `T` and body `ABCD` has AlReader book size 8; the X4 Pro section contains 4 body units. The title contributes one unit, and the simple fixture has three terminal units. An FB2 title `Long Title` shifts the saved body position by ten units.
 - The AlReader.com service was probed with a synthetic identifier only: `setUser` and `put` return `1 ok`; a missing `get` returns `0 value not found`; an existing `get` returns `1 !syncID!position`. The client now parses these results.
 - X4 Pro QEMU booted the candidate and opened synthetic EPUB and FB2 books without firmware log errors. With the first EPUB chapter's page cache deliberately removed and the book saved in chapter two, selecting an AlReader upload rebuilt the missing chapter cache before the Wi-Fi screen. The rebuild was sliced and did not stall the UI.
+- The latest `x4pro_gh_release` build succeeds and produces both an ESP32-S3 app image and factory image. Its app image contains the `CROSSPOINT-BOARD-V1:x4pro;` tag and no X4 tag. The KOReader client, worker and activity have no source diff from the protected v1.0 base.
+- A TLS handshake to `alreader.com` verifies against the firmware's own CA bundle. This checks the current certificate chain on the PC, not the device's HTTPS request.
 
 ## What still needs verification
 
-- A same-book network round trip between X4 Pro and Android AlReader. The available QEMU Wi-Fi scan reports zero access points, so the device-side HTTP path has not been exercised.
+- A same-book network round trip between X4 Pro and Android AlReader. The available X4 Pro QEMU Wi-Fi scan reports zero access points, including when a saved synthetic network is configured; its firmware log reports `NO_AP_FOUND`. Therefore the device-side HTTP path has not been exercised. The isolated test SD images contain no personal network or sync credentials.
 - Positions in complex books: page text, hidden nodes, notes and normalization can differ from the simple controlled fixtures.
 - Independent KOReader network regression and automatic AlReader synchronization behavior. KOReader code is gated by the selected provider; this is not yet a runtime regression result.
 - Physical X4 Pro timing and memory behavior, especially on a large book with many unopened chapters. The current missing-chapter recovery builds renderer caches in short slices, which is bounded per loop but can take time across a large book.
