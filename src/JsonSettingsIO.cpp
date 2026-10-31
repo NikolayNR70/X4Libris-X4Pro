@@ -560,6 +560,7 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
 bool JsonSettingsIO::saveAlReader(const AlReaderSyncSettings& settings, const char* path) {
   JsonDocument doc;
   doc["identifier"] = settings.identifier;
+  doc["autoSyncOnClose"] = settings.autoSyncOnClose;
   String json;
   serializeJson(doc, json);
   return Storage.writeFile(path, json);
@@ -573,6 +574,7 @@ bool JsonSettingsIO::loadAlReader(AlReaderSyncSettings& settings, const char* js
     return false;
   }
   settings.setIdentifier(doc["identifier"] | std::string(""));
+  settings.setAutoSyncOnClose(doc["autoSyncOnClose"] | false);
   return true;
 }
 

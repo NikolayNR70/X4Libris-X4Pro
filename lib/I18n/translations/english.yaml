@@ -175,6 +175,7 @@ STR_SYNC_MECHANISM: "Sync mechanism"
 STR_PROVIDER_KOREADER: "KOReader"
 STR_PROVIDER_ALREADER: "AlReader.com"
 STR_ALREADER_IDENTIFIER: "AlReader.com identifier"
+STR_ALREADER_AUTO_ON_CLOSE: "Sync with AlReader.com when closing a book"
 
 STR_SYSTEM_UPDATE: "System Update"
 STR_SYSTEM_UPDATE_TYPE1: "X4Libris Updates"

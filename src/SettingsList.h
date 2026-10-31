@@ -729,6 +729,15 @@ inline void buildSettings(const RowSink& emit) {
                                   static_cast<SettingInfo::StringSetterFn>(setAlReaderIdentifier),
                                   "alReaderIdentifier", StrId::STR_CAT_SYSTEM)
            .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
+  emit(SettingInfo::DynamicToggle(
+           StrId::STR_ALREADER_AUTO_ON_CLOSE,
+           [](const void*) -> uint8_t { return ALREADER_SYNC_SETTINGS.getAutoSyncOnClose() ? 1u : 0u; },
+           [](void*, uint8_t value) {
+             ALREADER_SYNC_SETTINGS.setAutoSyncOnClose(value != 0);
+             ALREADER_SYNC_SETTINGS.saveToFile();
+           },
+           "alReaderAutoSyncOnClose", StrId::STR_CAT_SYSTEM)
+           .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
 
   // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
   emit(SettingInfo::DynamicString(

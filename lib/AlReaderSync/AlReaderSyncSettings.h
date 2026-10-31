@@ -14,6 +14,7 @@ class AlReaderSyncSettings {
  private:
   static AlReaderSyncSettings instance;
   std::string identifier;
+  bool autoSyncOnClose = false;
 
   AlReaderSyncSettings() = default;
   friend bool JsonSettingsIO::saveAlReader(const AlReaderSyncSettings&, const char*);
@@ -30,6 +31,8 @@ class AlReaderSyncSettings {
   const std::string& getIdentifier() const { return identifier; }
   bool hasIdentifier() const { return !identifier.empty(); }
   void clearIdentifier();
+  bool getAutoSyncOnClose() const { return autoSyncOnClose; }
+  void setAutoSyncOnClose(bool enabled) { autoSyncOnClose = enabled; }
 };
 
 #define ALREADER_SYNC_SETTINGS AlReaderSyncSettings::getInstance()

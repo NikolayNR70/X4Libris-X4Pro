@@ -194,6 +194,7 @@ void SettingsActivity::onEnter() {
         case StrId::STR_SKIP_HTTPS_VALIDATION:
         case StrId::STR_SYNC_MECHANISM:
         case StrId::STR_ALREADER_IDENTIFIER:
+        case StrId::STR_ALREADER_AUTO_ON_CLOSE:
           addTo(networkSettings, enriched);
           break;
         default:

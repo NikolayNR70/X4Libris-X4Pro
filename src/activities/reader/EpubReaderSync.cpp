@@ -54,9 +54,9 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     return;
   }
 
-  // The provider selector routes only explicit, reader-menu/long-press actions. Automatic
-  // close-time sync remains KOReader's existing independent feature and is never redirected.
-  if (mode != SyncLaunchMode::AUTO_PUSH && SETTINGS.readingSyncProvider == 1) {
+  // Each selected provider owns its own manual and close-time synchronization.
+  // Its credentials and automatic option are stored independently.
+  if (SETTINGS.readingSyncProvider == 1) {
     if (!ALREADER_SYNC_SETTINGS.hasIdentifier()) {
       activityManager.goToFullScreenMessage("Укажите идентификатор AlReader.com в настройках сети.");
       return;
@@ -90,6 +90,7 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     AlIntent intent = AlIntent::COMPARE;
     if (mode == SyncLaunchMode::PULL_REMOTE) intent = AlIntent::PULL_REMOTE;
     if (mode == SyncLaunchMode::PUSH_LOCAL) intent = AlIntent::PUSH_LOCAL;
+    if (mode == SyncLaunchMode::AUTO_PUSH) intent = AlIntent::AUTO_PUSH;
     activityManager.goToAlReaderSync(epub, makeSectionBuildParams(), originalBookPath, epub->getCachePath(),
                                       bookKey, variantSuffix,
                                       epub->getSpineItemsCount(), alReaderSpine, alReaderPage, localPosition,
@@ -199,8 +200,12 @@ bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::strin
 }
 
 bool EpubReaderActivity::tryAutoPushOnClose() {
-  // KOReader's close-time feature must not write to KOReader while the selected
-  // manual sync provider is AlReader. AlReader has its own lifecycle.
+  if (SETTINGS.readingSyncProvider == 1) {
+    if (!ALREADER_SYNC_SETTINGS.getAutoSyncOnClose() || !ALREADER_SYNC_SETTINGS.hasIdentifier() ||
+        !epub || !section || currentSpineIndex >= epub->getSpineItemsCount()) return false;
+    launchKOReaderSync(SyncLaunchMode::AUTO_PUSH);
+    return true;
+  }
   if (SETTINGS.readingSyncProvider != 0) return false;
   // A page minimum filters out brief inspections — opening to check the cover or skim the TOC
   // shouldn't burn a network round-trip. Counter is per-activity-instance. The threshold is a

@@ -11,7 +11,7 @@
 
 class AlReaderSyncActivity final : public Activity {
  public:
-  enum class Intent : uint8_t { COMPARE, PULL_REMOTE, PUSH_LOCAL };
+  enum class Intent : uint8_t { COMPARE, PULL_REMOTE, PUSH_LOCAL, AUTO_PUSH };
 
   AlReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                        std::shared_ptr<Epub> epub, Section::BuildParams buildParams, std::string bookPath,
@@ -30,7 +30,8 @@ class AlReaderSyncActivity final : public Activity {
   bool preventAutoSleep() override { return waiting || phase_ == Phase::PrepareLocal || phase_ == Phase::PrepareRemote; }
 
  private:
-  enum class Phase : uint8_t { Idle, PrepareLocal, Register, Fetch, PrepareRemote, Update, Complete, Failed };
+  enum class Phase : uint8_t { Idle, PrepareLocal, Register, Fetch, Conflict, PrepareRemote, Update, VerifyUpdate,
+                               Complete, Failed };
 
   std::shared_ptr<Epub> epub_;
   Section::BuildParams buildParams_;
@@ -65,4 +66,6 @@ class AlReaderSyncActivity final : public Activity {
   void fail(const std::string& message);
   void handleResult(AlReaderSync::Job&& job);
   bool applyRemotePosition(uint32_t position);
+  void beginRemotePull();
+  void leaveSync();
 };

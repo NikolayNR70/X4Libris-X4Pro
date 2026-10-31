@@ -579,7 +579,7 @@ void ActivityManager::goToAlReaderSync(std::shared_ptr<Epub> epub, Section::Buil
                                          const uint32_t localPosition, const uint32_t titlePositionUnits,
                                          const uint8_t intent) {
   using Intent = AlReaderSyncActivity::Intent;
-  const auto safeIntent = intent <= static_cast<uint8_t>(Intent::PUSH_LOCAL) ? static_cast<Intent>(intent)
+  const auto safeIntent = intent <= static_cast<uint8_t>(Intent::AUTO_PUSH) ? static_cast<Intent>(intent)
                                                                              : Intent::COMPARE;
   replaceActivity(std::make_unique<AlReaderSyncActivity>(renderer, mappedInput, std::move(epub),
                                                           std::move(buildParams), std::move(bookPath),

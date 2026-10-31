@@ -117,7 +117,8 @@ void AlReaderSyncActivity::onExit() {
     delay(30);
     // The network-session trim deliberately releases the secondary framebuffer. Match the
     // established KOReader path and reboot before rebuilding reader state, restoring clean RAM.
-    silentRestartToReader();
+    if (intent_ == Intent::AUTO_PUSH) silentRestart();
+    else silentRestartToReader();
   }
 }
 
@@ -145,7 +146,7 @@ void AlReaderSyncActivity::prepareStep() {
     if (event.type == ButtonEventManager::PressType::Short &&
         event.button == MappedInputManager::Button::Back) {
       preparationSection_.reset();
-      activityManager.goToReader(bookPath_);
+      leaveSync();
       return;
     }
   }
@@ -266,18 +267,41 @@ void AlReaderSyncActivity::loop() {
     requestUpdate();
   }
 
+  if (phase_ == Phase::Conflict) {
+    ButtonEventManager::ButtonEvent event;
+    while (buttonEvents.consumeEvent(event)) {
+      if (event.type != ButtonEventManager::PressType::Short) continue;
+      if (event.button == MappedInputManager::Button::Back) {
+        leaveSync();
+        return;
+      }
+      if (event.button == MappedInputManager::Button::Confirm) {
+        status_ = "Передача позиции на AlReader.com…";
+        if (!post(AlReaderSync::Job::Operation::UPDATE)) fail("Не удалось запустить запись позиции.");
+        requestUpdate();
+        return;
+      }
+      if (event.button == MappedInputManager::Button::Right) {
+        beginRemotePull();
+        requestUpdate();
+        return;
+      }
+    }
+    return;
+  }
+
   if (phase_ == Phase::Complete || phase_ == Phase::Failed) {
     ButtonEventManager::ButtonEvent event;
     while (buttonEvents.consumeEvent(event)) {
       if (event.type == ButtonEventManager::PressType::Short) {
-        activityManager.goToReader(bookPath_);
+        leaveSync();
         return;
       }
     }
     // Keep failures visible until Back is pressed. A 1.4-second error flash hid the
     // actual cause of a failed sync and looked like a silent jump to the home screen.
     if (phase_ == Phase::Complete && millis() - completedAt_ >= kResultHoldMs)
-      activityManager.goToReader(bookPath_);
+      leaveSync();
   }
 }
 
@@ -294,36 +318,50 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
     return;
   }
 
+  if (phase_ == Phase::VerifyUpdate) {
+    if (!job.result.hasRecord || job.result.record.syncId != localSyncId() ||
+        job.result.record.readPositionStart != localPosition_) {
+      fail("AlReader.com не подтвердил новую позицию. Прежняя запись могла сохраниться.");
+      return;
+    }
+    LOG_INF("ARS", "Verified uploaded text position=%lu", static_cast<unsigned long>(localPosition_));
+    status_ = "Новая позиция сохранена и проверена на AlReader.com.";
+    phase_ = Phase::Complete;
+    completedAt_ = millis();
+    return;
+  }
+
   if (phase_ == Phase::Fetch) {
     if (job.result.hasRecord) {
       remote_ = job.result.record;
+      LOG_INF("ARS", "Fetched text positions local=%lu remote=%lu", static_cast<unsigned long>(localPosition_),
+              static_cast<unsigned long>(remote_.readPositionStart));
+      if (intent_ == Intent::AUTO_PUSH && localPosition_ <= remote_.readPositionStart) {
+        status_ = "На AlReader.com уже сохранена такая же или более поздняя позиция.";
+        phase_ = Phase::Complete;
+        completedAt_ = millis();
+        return;
+      }
       if (intent_ == Intent::COMPARE && localPosition_ == remote_.readPositionStart) {
         status_ = "Позиции чтения совпадают.";
         phase_ = Phase::Complete;
         completedAt_ = millis();
         return;
       }
-      if (intent_ == Intent::PUSH_LOCAL ||
-          (intent_ == Intent::COMPARE && localPosition_ > remote_.readPositionStart)) {
+      if (intent_ == Intent::COMPARE) {
+        status_ = "Позиции отличаются. Локальная: " + std::to_string(localPosition_) +
+                  ", AlReader.com: " + std::to_string(remote_.readPositionStart) +
+                  ". Выберите, какую сохранить.";
+        phase_ = Phase::Conflict;
+        return;
+      }
+      if (intent_ == Intent::PUSH_LOCAL || intent_ == Intent::AUTO_PUSH) {
         status_ = "Передача позиции на AlReader.com…";
         if (!post(AlReaderSync::Job::Operation::UPDATE)) fail("Не удалось запустить запись позиции.");
         return;
       }
-      if (intent_ == Intent::PULL_REMOTE || intent_ == Intent::COMPARE) {
-        if (!applyRemotePosition(remote_.readPositionStart)) {
-          remoteBodyPosition_ = remote_.readPositionStart > titlePositionUnits_
-                                    ? remote_.readPositionStart - titlePositionUnits_ : 0;
-          preparedLength_ = 0;
-          preparationSpine_ = 0;
-          phase_ = Phase::PrepareRemote;
-          preparationStartedAt_ = millis();
-          status_ = "Подготовка страницы из AlReader…";
-          requestUpdate();
-          return;
-        }
-        status_ = "Позиция получена с AlReader.com.";
-        phase_ = Phase::Complete;
-        completedAt_ = millis();
+      if (intent_ == Intent::PULL_REMOTE) {
+        beginRemotePull();
         return;
       }
     }
@@ -340,10 +378,26 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
   }
 
   if (phase_ == Phase::Update) {
-    status_ = "Позиция сохранена на AlReader.com.";
-    phase_ = Phase::Complete;
-    completedAt_ = millis();
+    status_ = "Проверка сохранённой позиции…";
+    if (!post(AlReaderSync::Job::Operation::FETCH)) fail("Не удалось проверить отправленную позицию.");
+    else phase_ = Phase::VerifyUpdate;
   }
+}
+
+void AlReaderSyncActivity::beginRemotePull() {
+  if (!applyRemotePosition(remote_.readPositionStart)) {
+    remoteBodyPosition_ = remote_.readPositionStart > titlePositionUnits_
+                              ? remote_.readPositionStart - titlePositionUnits_ : 0;
+    preparedLength_ = 0;
+    preparationSpine_ = 0;
+    phase_ = Phase::PrepareRemote;
+    preparationStartedAt_ = millis();
+    status_ = "Подготовка страницы из AlReader…";
+    return;
+  }
+  status_ = "Позиция получена с AlReader.com.";
+  phase_ = Phase::Complete;
+  completedAt_ = millis();
 }
 
 bool AlReaderSyncActivity::applyRemotePosition(const uint32_t position) {
@@ -357,6 +411,11 @@ bool AlReaderSyncActivity::applyRemotePosition(const uint32_t position) {
   if (!EpubReaderActivity::writeReaderProgressCache(cachePath_, spine, page, 0, 0)) return false;
   LOG_INF("ARS", "Applied AlReader position to cached page spine=%d page=%u", spine, page);
   return true;
+}
+
+void AlReaderSyncActivity::leaveSync() {
+  if (intent_ == Intent::AUTO_PUSH) activityManager.goHome();
+  else activityManager.goToReader(bookPath_);
 }
 
 void AlReaderSyncActivity::render(RenderLock&&) {
@@ -383,7 +442,10 @@ void AlReaderSyncActivity::render(RenderLock&&) {
     start = end + 1;
   }
   if (!line.empty()) renderer.drawText(UI_10_FONT_ID, textX, textY, line.c_str());
-  if (phase_ == Phase::Failed || phase_ == Phase::Complete || phase_ == Phase::PrepareLocal ||
+  if (phase_ == Phase::Conflict) {
+    const auto labels = mappedInput.mapLabels("Назад", "Отправить", "", "Получить");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (phase_ == Phase::Failed || phase_ == Phase::Complete || phase_ == Phase::PrepareLocal ||
       phase_ == Phase::PrepareRemote) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
