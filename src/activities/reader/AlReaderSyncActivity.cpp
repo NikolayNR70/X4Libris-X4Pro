@@ -24,7 +24,9 @@
 
 namespace {
 constexpr unsigned long kResultHoldMs = 1400;
-constexpr unsigned long kPhaseTimeoutMs = 35000;
+// UPDATE performs MKCOL and PUT on one worker job. Leave room for a Wi-Fi
+// reconnect and clock setup in addition to both bounded HTTP requests.
+constexpr unsigned long kPhaseTimeoutMs = 50000;
 constexpr unsigned long kPreparationTimeoutMs = 45000;
 int32_t localSyncId() {
   const auto id = static_cast<int32_t>(ESP.getEfuseMac() & 0x7fffffffULL);

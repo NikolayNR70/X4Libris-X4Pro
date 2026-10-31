@@ -5,6 +5,7 @@ contact AlReader.com and does not reuse KOReader's credentials or sync logic.
 
 Configure an HTTPS WebDAV base URL, username and password in **Settings →
 Network** on X4Libris. Use the same WebDAV location and credentials in AlReader.
+The server must support HTTP Basic authentication over a valid HTTPS certificate.
 The URL must refer to an existing writable root directory; do not append
 `AlReaderX-01Sync` yourself. X4Libris creates that child directory on the first
 upload. The password is stored with the project's device-bound obfuscation and
