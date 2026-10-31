@@ -1,7 +1,7 @@
 {
   "name": "X4Libris AlReader Sync",
   "version": "0.1.0",
-  "description": "Independent AlReader.com position-sync protocol and record codec",
+  "description": "Independent AlReader WebDAV position-sync protocol and record codec",
   "frameworks": "arduino",
   "platforms": "espressif32",
   "build": {

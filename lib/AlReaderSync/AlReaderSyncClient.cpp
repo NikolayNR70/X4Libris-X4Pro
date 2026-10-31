@@ -11,8 +11,8 @@
 
 namespace AlReaderSync {
 namespace {
-constexpr char kEndpoint[] = "https://alreader.com/aldb/index2.php";
-constexpr char kUserAgent[] = "X4Libris-AlReaderSync/1";
+constexpr char kFolder[] = "AlReaderX-01Sync";
+constexpr char kUserAgent[] = "X4Libris-AlReaderWebDAV/1";
 constexpr size_t kMaxReplyBytes = 256;
 
 std::string_view trimmed(std::string_view value) {
@@ -26,15 +26,13 @@ bool isUnreserved(const uint8_t c) {
          c == '.' || c == '~';
 }
 
-std::string formEncode(const std::string& input) {
+std::string pathEncode(const std::string& input) {
   static constexpr char hex[] = "0123456789ABCDEF";
   std::string out;
   out.reserve(input.size() * 3);
   for (const uint8_t c : input) {
     if (isUnreserved(c)) {
       out.push_back(static_cast<char>(c));
-    } else if (c == ' ') {
-      out.push_back('+');
     } else {
       out.push_back('%');
       out.push_back(hex[c >> 4]);
@@ -71,28 +69,22 @@ bool parseUnsigned(const std::string& s, const size_t begin, const size_t end, u
   return true;
 }
 
-Result request(const std::string& operation, const std::string& identifier, const std::string& bookKey,
-               const PositionRecord* record) {
-  Result result;
-  if (!validToken(identifier, 160) || !validToken(bookKey, 256)) {
-    result.error = Error::InvalidInput;
-    result.message = "Invalid sync identifier or book key";
-    return result;
-  }
-  if (record && (record->syncId < INT32_MIN || record->syncId > INT32_MAX ||
-                 record->readPositionStart > static_cast<uint32_t>(INT32_MAX))) {
-    result.error = Error::InvalidInput;
-    result.message = "AlReader text position is out of range";
-    return result;
-  }
+bool validBaseUrlImpl(const std::string& url) {
+  if (url.size() < 9 || url.size() > 256 || url.compare(0, 8, "https://") != 0) return false;
+  const size_t hostEnd = url.find('/', 8);
+  const std::string_view host(url.data() + 8, (hostEnd == std::string::npos ? url.size() : hostEnd) - 8);
+  if (host.empty() || host.find('@') != std::string_view::npos || host.find(':') == 0) return false;
+  if (url.find_first_of("?#") != std::string::npos) return false;
+  for (const unsigned char c : url) if (c < 0x21 || c == 0x7f || c == '\\') return false;
+  return true;
+}
 
-  // Match the AlReader client contract: empty-body POST, parameters in the
-  // query, explicit zero content length, fixed HTTPS host, redirects disabled.
-  std::string url = std::string(kEndpoint) + "?o=" + operation + "&u=" + formEncode(identifier) +
-                    "&p=null&n=" + formEncode(bookKey) + "&a=AlReaderX";
-  if (record) url += "&v=" + formEncode(encodePositionRecord(*record));
+std::string folderUrl(std::string base) {
+  if (base.back() != '/') base += '/';
+  return base + kFolder + '/';
+}
 
-  crosspoint::SecureHttpClient http;
+void configure(crosspoint::SecureHttpClient& http, const std::string& username, const std::string& password) {
   http.setCACert(CROSSPOINT_ROOTS_PEM);
   http.setAllowInsecureFallback(false);
   http.setAllowCertificateDateErrors(!HalClock::isPlausibleForTls());
@@ -102,54 +94,65 @@ Result request(const std::string& operation, const std::string& identifier, cons
   http.setMaxRedirects(0);
   http.setUserAgent(kUserAgent);
   http.setQuietRequests(true);
-  http.addHeader("Accept", "text/plain, */*");
-  http.addHeader("Content-Length", "0");
+  http.setBasicAuth(username, password);
+}
 
-  const int status = http.POST(url, "");
+Result request(const bool update, const std::string& baseUrl, const std::string& username,
+               const std::string& password, const std::string& bookKey, const PositionRecord* record) {
+  Result result;
+  if (!validBaseUrlImpl(baseUrl) || !validToken(username, 160) || !validToken(password, 160) ||
+      !validToken(bookKey, 256) || bookKey == "." || bookKey == "..") {
+    result.error = Error::InvalidInput;
+    result.message = "Invalid WebDAV address, credentials or book key";
+    return result;
+  }
+  if (record && record->readPositionStart > static_cast<uint32_t>(INT32_MAX)) {
+    result.error = Error::InvalidInput;
+    result.message = "AlReader text position is out of range";
+    return result;
+  }
+
+  const std::string folder = folderUrl(baseUrl);
+  const std::string file = folder + pathEncode(bookKey);
+  crosspoint::SecureHttpClient http;
+  configure(http, username, password);
+  if (update) {
+    // The folder is created lazily, as in AlReader's own WebDAV provider.
+    const int mkdirStatus = http.request("MKCOL", folder);
+    if (mkdirStatus != 201 && mkdirStatus != 405 && mkdirStatus != 200 && mkdirStatus != 204) {
+      result.httpStatus = mkdirStatus >= 100 ? mkdirStatus : 0;
+      result.error = mkdirStatus < 100 ? Error::Transport : Error::HttpStatus;
+      result.message = "Could not create AlReader WebDAV folder";
+      return result;
+    }
+    http.addHeader("Content-Type", "*/*");
+  } else {
+    http.addHeader("Accept", "text/plain, */*");
+  }
+  const int status = update ? http.PUT(file, encodePositionRecord(*record)) : http.GET(file);
   result.httpStatus = status >= 100 ? status : 0;
   if (status < 100) {
     result.error = Error::Transport;
-    result.message = "AlReader.com connection failed";
+    result.message = "WebDAV connection failed";
     return result;
   }
-  if (status != 200) {
+  if (!update && status == 404) return result;
+  if (update ? (status != 200 && status != 201 && status != 204) : status != 200) {
     result.error = Error::HttpStatus;
-    result.message = "AlReader.com returned an HTTP error";
+    result.message = status == 401 || status == 403 ? "WebDAV credentials rejected" : "WebDAV HTTP error";
     return result;
   }
-  if (http.bodyTruncated()) {
+  if (!update && http.bodyTruncated()) {
     result.error = Error::InvalidReply;
-    result.message = "AlReader.com reply exceeded the expected size";
+    result.message = "WebDAV position record is too large";
     return result;
   }
-
-  const std::string_view reply = trimmed(http.getBody());
-  if (operation == "get") {
-    if (reply == "0 login incorrect") {
-      result.error = Error::LoginRejected;
-      result.message = "AlReader.com rejected the sync identifier";
-      return result;
-    }
-    if (reply == "0 value not found") {
-      result.hasRecord = false;
-      return result;
-    }
-    if (reply.size() > 2 && reply.substr(0, 2) == "1 " &&
-        decodePositionRecord(std::string(trimmed(reply.substr(2))), result.record)) {
-      result.hasRecord = true;
-      return result;
-    }
+  if (!update && !decodePositionRecord(std::string(trimmed(http.getBody())), result.record)) {
     result.error = Error::InvalidReply;
-    result.message = "AlReader.com returned an unrecognized position record";
+    result.message = "WebDAV position record is invalid";
     return result;
   }
-
-  // The live service returns `1 ok` on setUser/put and can report failure with
-  // HTTP 200. Do not treat that failure as a successful upload.
-  if (reply != "1 ok") {
-    result.error = Error::InvalidReply;
-    result.message = "AlReader.com rejected the sync operation";
-  }
+  result.hasRecord = !update;
   return result;
 }
 }  // namespace
@@ -177,7 +180,7 @@ bool decodePositionRecord(const std::string& text, PositionRecord& out) {
   if (split == std::string::npos || split >= right) return false;
 
   PositionRecord parsed;
-  if (!parseSigned(text, left, split, parsed.syncId) || parsed.syncId < INT32_MIN || parsed.syncId > INT32_MAX ||
+  if (!parseSigned(text, left, split, parsed.syncId) ||
       !parseUnsigned(text, split + 1, right, parsed.readPositionStart) ||
       parsed.readPositionStart > static_cast<uint32_t>(INT32_MAX)) {
     return false;
@@ -186,17 +189,19 @@ bool decodePositionRecord(const std::string& text, PositionRecord& out) {
   return true;
 }
 
-Result AlReaderComClient::registerIdentifier(const std::string& identifier, const std::string& bookKey) {
-  return request("setUser", identifier, bookKey, nullptr);
+bool AlReaderWebDavClient::validBaseUrl(const std::string& baseUrl) {
+  return validBaseUrlImpl(baseUrl);
 }
 
-Result AlReaderComClient::fetch(const std::string& identifier, const std::string& bookKey) {
-  return request("get", identifier, bookKey, nullptr);
+Result AlReaderWebDavClient::fetch(const std::string& baseUrl, const std::string& username,
+                                  const std::string& password, const std::string& bookKey) {
+  return request(false, baseUrl, username, password, bookKey, nullptr);
 }
 
-Result AlReaderComClient::update(const std::string& identifier, const std::string& bookKey,
-                                 const PositionRecord& record) {
-  return request("put", identifier, bookKey, &record);
+Result AlReaderWebDavClient::update(const std::string& baseUrl, const std::string& username,
+                                   const std::string& password, const std::string& bookKey,
+                                   const PositionRecord& record) {
+  return request(true, baseUrl, username, password, bookKey, &record);
 }
 
 }  // namespace AlReaderSync

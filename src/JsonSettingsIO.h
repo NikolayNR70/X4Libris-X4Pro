@@ -30,7 +30,7 @@ bool loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave = 
 bool saveKOReader(const KOReaderCredentialStore& store, const char* path);
 bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave = nullptr);
 
-// AlReader.com identifier (stored independently from KOReader configuration)
+// AlReader WebDAV credentials (stored independently from KOReader configuration)
 bool saveAlReader(const AlReaderSyncSettings& settings, const char* path);
 bool loadAlReader(AlReaderSyncSettings& settings, const char* json);
 

@@ -20,7 +20,7 @@ namespace fui = freeink::ui;
 
 namespace {
 bool selectedSyncProviderIsConfigured() {
-  return SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials();
+  return SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasWebDavCredentials() : KOREADER_STORE.hasCredentials();
 }
 
 // Three-state cycle helper for overrides represented as int8_t with -1 = default.

@@ -555,11 +555,13 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   return true;
 }
 
-// ---- AlReader.com position sync ----
+// ---- AlReader WebDAV position sync ----
 
 bool JsonSettingsIO::saveAlReader(const AlReaderSyncSettings& settings, const char* path) {
   JsonDocument doc;
-  doc["identifier"] = settings.identifier;
+  doc["webDavUrl"] = settings.webDavUrl;
+  doc["webDavUsername"] = settings.webDavUsername;
+  doc["webDavPassword_obf"] = obfuscation::obfuscateToBase64(settings.webDavPassword);
   doc["autoSyncOnClose"] = settings.autoSyncOnClose;
   String json;
   serializeJson(doc, json);
@@ -573,7 +575,13 @@ bool JsonSettingsIO::loadAlReader(AlReaderSyncSettings& settings, const char* js
     LOG_ERR("ARS", "AlReader settings JSON parse error: %s", error.c_str());
     return false;
   }
-  settings.setIdentifier(doc["identifier"] | std::string(""));
+  settings.setWebDavUrl(doc["webDavUrl"] | std::string(""));
+  settings.setWebDavUsername(doc["webDavUsername"] | std::string(""));
+  bool passwordOk = false;
+  bool passwordTooLong = false;
+  settings.setWebDavPassword(obfuscation::deobfuscateFromBase64(
+      doc["webDavPassword_obf"] | "", MAX_PASSWORD_LENGTH, &passwordOk, &passwordTooLong));
+  if (passwordTooLong) LOG_ERR("ARS", "Discarding oversized WebDAV password");
   settings.setAutoSyncOnClose(doc["autoSyncOnClose"] | false);
   return true;
 }

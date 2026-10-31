@@ -25,15 +25,14 @@ bool AlReaderSyncSettings::loadFromFile() {
   return loaded;
 }
 
-void AlReaderSyncSettings::setIdentifier(const std::string& value) {
-  if (value.size() > 160) return;
-  for (const unsigned char c : value) {
-    if (c < 0x20 || c == 0x7f) return;
-  }
-  identifier = value;
+void AlReaderSyncSettings::setWebDavUrl(const std::string& value) {
+  if (value.size() <= 256) webDavUrl = value;
 }
 
-void AlReaderSyncSettings::clearIdentifier() {
-  identifier.clear();
-  saveToFile();
+void AlReaderSyncSettings::setWebDavUsername(const std::string& value) {
+  if (value.size() <= 160 && value.find_first_of("\r\n") == std::string::npos) webDavUsername = value;
+}
+
+void AlReaderSyncSettings::setWebDavPassword(const std::string& value) {
+  if (value.size() <= 64 && value.find_first_of("\r\n") == std::string::npos) webDavPassword = value;
 }

@@ -8,10 +8,12 @@
 namespace AlReaderSync {
 
 struct Job {
-  enum class Operation : uint8_t { REGISTER, FETCH, UPDATE };
+  enum class Operation : uint8_t { FETCH, UPDATE };
 
   Operation operation = Operation::FETCH;
-  std::string identifier;
+  std::string webDavUrl;
+  std::string username;
+  std::string password;
   std::string bookKey;
   PositionRecord record;
   Result result;

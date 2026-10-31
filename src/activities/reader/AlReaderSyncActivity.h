@@ -30,7 +30,7 @@ class AlReaderSyncActivity final : public Activity {
   bool preventAutoSleep() override { return waiting || phase_ == Phase::PrepareLocal || phase_ == Phase::PrepareRemote; }
 
  private:
-  enum class Phase : uint8_t { Idle, PrepareLocal, Register, Fetch, Conflict, PrepareRemote, Update, VerifyUpdate,
+  enum class Phase : uint8_t { Idle, PrepareLocal, Fetch, Conflict, PrepareRemote, Update, VerifyUpdate,
                                Complete, Failed };
 
   std::shared_ptr<Epub> epub_;

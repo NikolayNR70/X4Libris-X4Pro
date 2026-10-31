@@ -90,14 +90,12 @@ void perform(AlReaderSync::Job& job) {
   // enforces its own connect and total deadlines and never retries indefinitely.
   HalClock::ensureUsableForTls(SETTINGS.ntpServer);
   switch (job.operation) {
-    case AlReaderSync::Job::Operation::REGISTER:
-      job.result = AlReaderSync::AlReaderComClient::registerIdentifier(job.identifier, job.bookKey);
-      break;
     case AlReaderSync::Job::Operation::FETCH:
-      job.result = AlReaderSync::AlReaderComClient::fetch(job.identifier, job.bookKey);
+      job.result = AlReaderSync::AlReaderWebDavClient::fetch(job.webDavUrl, job.username, job.password, job.bookKey);
       break;
     case AlReaderSync::Job::Operation::UPDATE:
-      job.result = AlReaderSync::AlReaderComClient::update(job.identifier, job.bookKey, job.record);
+      job.result = AlReaderSync::AlReaderWebDavClient::update(job.webDavUrl, job.username, job.password,
+                                                              job.bookKey, job.record);
       break;
   }
 

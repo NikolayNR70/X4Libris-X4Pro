@@ -193,7 +193,9 @@ void SettingsActivity::onEnter() {
           break;
         case StrId::STR_SKIP_HTTPS_VALIDATION:
         case StrId::STR_SYNC_MECHANISM:
-        case StrId::STR_ALREADER_IDENTIFIER:
+        case StrId::STR_ALREADER_WEBDAV_URL:
+        case StrId::STR_ALREADER_WEBDAV_USERNAME:
+        case StrId::STR_ALREADER_WEBDAV_PASSWORD:
         case StrId::STR_ALREADER_AUTO_ON_CLOSE:
           addTo(networkSettings, enriched);
           break;
@@ -387,16 +389,26 @@ void SettingsActivity::activateIndex(const int index) {
     return;
   }
 
-  if (setting.nameId == StrId::STR_ALREADER_IDENTIFIER && setting.type == SettingType::STRING &&
+  if ((setting.nameId == StrId::STR_ALREADER_WEBDAV_URL ||
+       setting.nameId == StrId::STR_ALREADER_WEBDAV_USERNAME ||
+       setting.nameId == StrId::STR_ALREADER_WEBDAV_PASSWORD) && setting.type == SettingType::STRING &&
       setting.stringGetter && setting.stringSetter) {
     const auto initial = setting.stringGetter(setting.accessorCtx);
+    const auto field = setting.nameId;
+    const auto inputType = field == StrId::STR_ALREADER_WEBDAV_PASSWORD ? InputType::Password
+                           : field == StrId::STR_ALREADER_WEBDAV_URL ? InputType::Url : InputType::Text;
     startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ALREADER_IDENTIFIER),
-                                                initial, 160, InputType::Text),
-        [this](const ActivityResult& result) {
+        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, I18N.get(field),
+                                                initial, field == StrId::STR_ALREADER_WEBDAV_URL ? 256
+                                                         : field == StrId::STR_ALREADER_WEBDAV_PASSWORD ? 64 : 160,
+                                                inputType),
+        [this, field](const ActivityResult& result) {
           if (!result.isCancelled) {
             if (const auto* typed = std::get_if<KeyboardResult>(&result.data)) {
-              ALREADER_SYNC_SETTINGS.setIdentifier(typed->text);
+              if (field == StrId::STR_ALREADER_WEBDAV_URL) ALREADER_SYNC_SETTINGS.setWebDavUrl(typed->text);
+              else if (field == StrId::STR_ALREADER_WEBDAV_USERNAME)
+                ALREADER_SYNC_SETTINGS.setWebDavUsername(typed->text);
+              else ALREADER_SYNC_SETTINGS.setWebDavPassword(typed->text);
               ALREADER_SYNC_SETTINGS.saveToFile();
             }
           }

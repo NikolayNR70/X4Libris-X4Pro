@@ -55,8 +55,9 @@ AlReaderSyncActivity::AlReaderSyncActivity(GfxRenderer& renderer, MappedInputMan
 
 void AlReaderSyncActivity::onEnter() {
   Activity::onEnter();
-  if (!ALREADER_SYNC_SETTINGS.hasIdentifier()) {
-    fail("Сначала укажите идентификатор AlReader.com в настройках сети.");
+  if (!ALREADER_SYNC_SETTINGS.hasWebDavCredentials() ||
+      !AlReaderSync::AlReaderWebDavClient::validBaseUrl(ALREADER_SYNC_SETTINGS.getWebDavUrl())) {
+    fail("Укажите адрес HTTPS, имя и пароль WebDAV в настройках сети.");
     return;
   }
   if (bookKey_.empty() || !epub_ || spineCount_ <= 0 ||
@@ -84,7 +85,7 @@ void AlReaderSyncActivity::startNetwork() {
   preparationFontUnloaded_ = true;
   trimMemoryForNetworkSession(renderer, "ARS");
   networkMemoryTrimmed_ = !renderer.hasSecondaryBuffer();
-  status_ = "Подключение к AlReader.com…";
+  status_ = "Подключение к WebDAV…";
   if (WiFi.status() != WL_CONNECTED) {
     status_ = "Подключение к Wi-Fi…";
     startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, true, 30000),
@@ -94,12 +95,12 @@ void AlReaderSyncActivity::startNetwork() {
                                return;
                              }
                              WiFi.setSleep(false);
-                             status_ = "Подключение к AlReader.com…";
-                             if (!post(AlReaderSync::Job::Operation::REGISTER))
+                             status_ = "Подключение к WebDAV…";
+                             if (!post(AlReaderSync::Job::Operation::FETCH))
                                fail("Не удалось запустить фоновую синхронизацию.");
                              requestUpdate();
                            });
-  } else if (!post(AlReaderSync::Job::Operation::REGISTER)) {
+  } else if (!post(AlReaderSync::Job::Operation::FETCH)) {
     fail("Не удалось запустить фоновую синхронизацию.");
   }
   requestUpdate();
@@ -125,16 +126,16 @@ void AlReaderSyncActivity::onExit() {
 bool AlReaderSyncActivity::post(const AlReaderSync::Job::Operation operation) {
   AlReaderSync::Job job;
   job.operation = operation;
-  job.identifier = ALREADER_SYNC_SETTINGS.getIdentifier();
+  job.webDavUrl = ALREADER_SYNC_SETTINGS.getWebDavUrl();
+  job.username = ALREADER_SYNC_SETTINGS.getWebDavUsername();
+  job.password = ALREADER_SYNC_SETTINGS.getWebDavPassword();
   job.bookKey = bookKey_;
   if (operation == AlReaderSync::Job::Operation::UPDATE) {
     job.record.syncId = localSyncId();
     job.record.readPositionStart = localPosition_;
   }
   if (!AlReaderSync::Worker::post(std::move(job), &sequence_)) return false;
-  phase_ = operation == AlReaderSync::Job::Operation::REGISTER
-               ? Phase::Register
-               : (operation == AlReaderSync::Job::Operation::FETCH ? Phase::Fetch : Phase::Update);
+  phase_ = operation == AlReaderSync::Job::Operation::FETCH ? Phase::Fetch : Phase::Update;
   waiting = true;
   phaseStartedAt_ = millis();
   return true;
@@ -196,7 +197,7 @@ void AlReaderSyncActivity::prepareStep() {
         return;
       }
       if (applyRemotePosition(remote_.readPositionStart)) {
-        status_ = "Позиция получена с AlReader.com.";
+        status_ = "Позиция получена через WebDAV.";
         phase_ = Phase::Complete;
         completedAt_ = millis();
         requestUpdate();
@@ -258,7 +259,7 @@ void AlReaderSyncActivity::loop() {
     return;
   }
   if (waiting && millis() - phaseStartedAt_ >= kPhaseTimeoutMs) {
-    fail("Превышено время ожидания AlReader.com. Проверьте подключение и повторите попытку.");
+    fail("Превышено время ожидания WebDAV. Проверьте подключение и повторите попытку.");
   }
   if (waiting && AlReaderSync::Worker::isDone(sequence_)) {
     auto job = AlReaderSync::Worker::consume(sequence_);
@@ -276,7 +277,7 @@ void AlReaderSyncActivity::loop() {
         return;
       }
       if (event.button == MappedInputManager::Button::Confirm) {
-        status_ = "Передача позиции на AlReader.com…";
+        status_ = "Передача позиции через WebDAV…";
         if (!post(AlReaderSync::Job::Operation::UPDATE)) fail("Не удалось запустить запись позиции.");
         requestUpdate();
         return;
@@ -307,25 +308,19 @@ void AlReaderSyncActivity::loop() {
 
 void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
   if (!job.result) {
-    fail(job.result.message.empty() ? "Синхронизация AlReader.com не выполнена." : job.result.message);
+    fail(job.result.message.empty() ? "Синхронизация WebDAV не выполнена." : job.result.message);
     completedAt_ = millis();
-    return;
-  }
-
-  if (phase_ == Phase::Register) {
-    status_ = "Проверка позиции книги…";
-    if (!post(AlReaderSync::Job::Operation::FETCH)) fail("Не удалось запустить запрос позиции.");
     return;
   }
 
   if (phase_ == Phase::VerifyUpdate) {
     if (!job.result.hasRecord || job.result.record.syncId != localSyncId() ||
         job.result.record.readPositionStart != localPosition_) {
-      fail("AlReader.com не подтвердил новую позицию. Прежняя запись могла сохраниться.");
+      fail("WebDAV не подтвердил новую позицию. Прежняя запись могла сохраниться.");
       return;
     }
     LOG_INF("ARS", "Verified uploaded text position=%lu", static_cast<unsigned long>(localPosition_));
-    status_ = "Новая позиция сохранена и проверена на AlReader.com.";
+    status_ = "Новая позиция сохранена и проверена через WebDAV.";
     phase_ = Phase::Complete;
     completedAt_ = millis();
     return;
@@ -337,7 +332,7 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
       LOG_INF("ARS", "Fetched text positions local=%lu remote=%lu", static_cast<unsigned long>(localPosition_),
               static_cast<unsigned long>(remote_.readPositionStart));
       if (intent_ == Intent::AUTO_PUSH && localPosition_ <= remote_.readPositionStart) {
-        status_ = "На AlReader.com уже сохранена такая же или более поздняя позиция.";
+        status_ = "На WebDAV уже сохранена такая же или более поздняя позиция.";
         phase_ = Phase::Complete;
         completedAt_ = millis();
         return;
@@ -350,13 +345,13 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
       }
       if (intent_ == Intent::COMPARE) {
         status_ = "Позиции отличаются. Локальная: " + std::to_string(localPosition_) +
-                  ", AlReader.com: " + std::to_string(remote_.readPositionStart) +
+                  ", WebDAV: " + std::to_string(remote_.readPositionStart) +
                   ". Выберите, какую сохранить.";
         phase_ = Phase::Conflict;
         return;
       }
       if (intent_ == Intent::PUSH_LOCAL || intent_ == Intent::AUTO_PUSH) {
-        status_ = "Передача позиции на AlReader.com…";
+        status_ = "Передача позиции через WebDAV…";
         if (!post(AlReaderSync::Job::Operation::UPDATE)) fail("Не удалось запустить запись позиции.");
         return;
       }
@@ -367,7 +362,7 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
     }
 
     if (intent_ == Intent::PULL_REMOTE) {
-      fail("На AlReader.com ещё нет позиции этой книги.");
+      fail("На WebDAV ещё нет позиции этой книги.");
       return;
     }
     // An empty successful GET means that no position exists yet. Seed the shared record with
@@ -395,7 +390,7 @@ void AlReaderSyncActivity::beginRemotePull() {
     status_ = "Подготовка страницы из AlReader…";
     return;
   }
-  status_ = "Позиция получена с AlReader.com.";
+  status_ = "Позиция получена через WebDAV.";
   phase_ = Phase::Complete;
   completedAt_ = millis();
 }
@@ -421,7 +416,7 @@ void AlReaderSyncActivity::leaveSync() {
 void AlReaderSyncActivity::render(RenderLock&&) {
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   renderer.clearScreen();
-  renderer.drawCenteredText(UI_12_FONT_ID, contentRect.y + 18, "AlReader.com", true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, contentRect.y + 18, "AlReader WebDAV", true, EpdFontFamily::BOLD);
   const int textX = contentRect.x + 12;
   const int maxWidth = contentRect.width - 24;
   int textY = contentRect.y + 72;

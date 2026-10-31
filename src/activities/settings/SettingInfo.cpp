@@ -54,7 +54,9 @@ std::string SettingInfo::getDisplayValue() const {
       if (stringGetter) return callStringGetter();
       return std::string(">>");
     case SettingType::STRING:
-      if (nameId == StrId::STR_ALREADER_IDENTIFIER) return std::string(">>");
+      if (nameId == StrId::STR_ALREADER_WEBDAV_URL ||
+          nameId == StrId::STR_ALREADER_WEBDAV_USERNAME ||
+          nameId == StrId::STR_ALREADER_WEBDAV_PASSWORD) return std::string(">>");
       return {};
   }
   return {};

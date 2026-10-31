@@ -57,8 +57,8 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   // Each selected provider owns its own manual and close-time synchronization.
   // Its credentials and automatic option are stored independently.
   if (SETTINGS.readingSyncProvider == 1) {
-    if (!ALREADER_SYNC_SETTINGS.hasIdentifier()) {
-      activityManager.goToFullScreenMessage("Укажите идентификатор AlReader.com в настройках сети.");
+    if (!ALREADER_SYNC_SETTINGS.hasWebDavCredentials()) {
+      activityManager.goToFullScreenMessage("Укажите адрес, имя и пароль AlReader WebDAV в настройках сети.");
       return;
     }
     const int alReaderSpine = positionOverride ? positionOverride->spineIndex : currentSpineIndex;
@@ -79,7 +79,7 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
       return;
     }
     // UINT32_MAX asks the sync activity to build missing preceding spine indexes in
-    // short slices before it contacts the service. The current page cache already exists.
+    // short slices before it contacts WebDAV. The current page cache already exists.
     const uint32_t localPosition = bodyPosition ? *bodyPosition + titlePositionUnits : UINT32_MAX;
     const auto bookKey = AlReaderSync::makeAlReaderBookKeyFromFile(originalBookPath);
     if (bookKey.empty()) {
@@ -201,7 +201,7 @@ bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::strin
 
 bool EpubReaderActivity::tryAutoPushOnClose() {
   if (SETTINGS.readingSyncProvider == 1) {
-    if (!ALREADER_SYNC_SETTINGS.getAutoSyncOnClose() || !ALREADER_SYNC_SETTINGS.hasIdentifier() ||
+    if (!ALREADER_SYNC_SETTINGS.getAutoSyncOnClose() || !ALREADER_SYNC_SETTINGS.hasWebDavCredentials() ||
         !epub || !section || currentSpineIndex >= epub->getSpineItemsCount()) return false;
     launchKOReaderSync(SyncLaunchMode::AUTO_PUSH);
     return true;

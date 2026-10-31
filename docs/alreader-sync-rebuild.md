@@ -1,4 +1,7 @@
-# AlReader.com synchronization candidate
+# Historical AlReader.com experiment (inactive)
+
+This document records the earlier service experiment. The current isolated
+candidate uses WebDAV; see [alreader-webdav-sync.md](alreader-webdav-sync.md).
 
 This document records the isolated `feat/alreader-sync-rebuild-20261031` branch. It is a work in progress, not a release. Published X4Libris v1.0 is unchanged.
 

@@ -1005,7 +1005,7 @@ void EpubReaderActivity::loop() {
   while (buttonEvents.consumeEvent(ev)) {
     if (ev.button == MappedInputManager::Button::Confirm) {
       if (ev.type == ButtonEventManager::PressType::Long &&
-          (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials())) {
+          (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasWebDavCredentials() : KOREADER_STORE.hasCredentials())) {
         launchKOReaderSync(SyncLaunchMode::COMPARE);
         return;
       }
@@ -2704,7 +2704,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::PULL_REMOTE: {
       // One-tap pull path: run network preconditions and apply remote progress
       // directly instead of showing an intermediate chooser screen.
-      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials()) {
+      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasWebDavCredentials() : KOREADER_STORE.hasCredentials()) {
         launchKOReaderSync(SyncLaunchMode::PULL_REMOTE);
       }
       break;
@@ -2712,14 +2712,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     case EpubReaderMenuActivity::MenuAction::PUSH_LOCAL: {
       // One-tap push path: run network preconditions and upload local progress
       // directly for KOReader-like "sync now" behavior.
-      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials()) {
+      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasWebDavCredentials() : KOREADER_STORE.hasCredentials()) {
         launchKOReaderSync(SyncLaunchMode::PUSH_LOCAL);
       }
       break;
     }
     case EpubReaderMenuActivity::MenuAction::COMPARE_REMOTE: {
       // The menu's third sync entry: the same compare-then-choose flow a long Confirm press starts.
-      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials()) {
+      if (SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasWebDavCredentials() : KOREADER_STORE.hasCredentials()) {
         launchKOReaderSync(SyncLaunchMode::COMPARE);
       }
       break;

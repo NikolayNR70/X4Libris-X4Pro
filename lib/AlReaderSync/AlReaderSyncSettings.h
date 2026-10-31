@@ -8,12 +8,13 @@ bool saveAlReader(const AlReaderSyncSettings& settings, const char* path);
 bool loadAlReader(AlReaderSyncSettings& settings, const char* json);
 }  // namespace JsonSettingsIO
 
-// AlReader.com identifies a reader by a shared free-form string (usually email).
-// It is kept in its own X4Libris settings file and never shares KOReader fields.
+// AlReader's independent WebDAV configuration; never shares KOReader fields.
 class AlReaderSyncSettings {
  private:
   static AlReaderSyncSettings instance;
-  std::string identifier;
+  std::string webDavUrl;
+  std::string webDavUsername;
+  std::string webDavPassword;
   bool autoSyncOnClose = false;
 
   AlReaderSyncSettings() = default;
@@ -27,10 +28,13 @@ class AlReaderSyncSettings {
   static AlReaderSyncSettings& getInstance() { return instance; }
   bool saveToFile() const;
   bool loadFromFile();
-  void setIdentifier(const std::string& value);
-  const std::string& getIdentifier() const { return identifier; }
-  bool hasIdentifier() const { return !identifier.empty(); }
-  void clearIdentifier();
+  void setWebDavUrl(const std::string& value);
+  void setWebDavUsername(const std::string& value);
+  void setWebDavPassword(const std::string& value);
+  const std::string& getWebDavUrl() const { return webDavUrl; }
+  const std::string& getWebDavUsername() const { return webDavUsername; }
+  const std::string& getWebDavPassword() const { return webDavPassword; }
+  bool hasWebDavCredentials() const { return !webDavUrl.empty() && !webDavUsername.empty() && !webDavPassword.empty(); }
   bool getAutoSyncOnClose() const { return autoSyncOnClose; }
   void setAutoSyncOnClose(bool enabled) { autoSyncOnClose = enabled; }
 };

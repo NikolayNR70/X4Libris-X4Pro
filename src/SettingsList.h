@@ -78,12 +78,9 @@ inline std::string getKoReaderUsername(void*) { return KOREADER_STORE.getUsernam
 
 inline std::string getKoReaderPassword(void*) { return KOREADER_STORE.getPassword(); }
 
-inline std::string getAlReaderIdentifier(void*) { return ALREADER_SYNC_SETTINGS.getIdentifier(); }
-
-inline void setAlReaderIdentifier(void*, const std::string& value) {
-  ALREADER_SYNC_SETTINGS.setIdentifier(value);
-  ALREADER_SYNC_SETTINGS.saveToFile();
-}
+inline std::string getAlReaderWebDavUrl(void*) { return ALREADER_SYNC_SETTINGS.getWebDavUrl(); }
+inline std::string getAlReaderWebDavUsername(void*) { return ALREADER_SYNC_SETTINGS.getWebDavUsername(); }
+inline std::string getAlReaderWebDavPassword(void*) { return ALREADER_SYNC_SETTINGS.getWebDavPassword(); }
 
 inline std::string getSleepTimeoutDisplay(void*) {
   const uint8_t v = SETTINGS.sleepTimeoutMinutes;
@@ -719,16 +716,32 @@ inline void buildSettings(const RowSink& emit) {
   emit(SettingInfo::Toggle(StrId::STR_APPLICATIONS_FOLDER, &CrossPointSettings::useApplicationsFolder,
                            "useApplicationsFolder", StrId::STR_NONE_OPT));
 
-  // --- Reading sync provider and AlReader.com identifier ---
+  // --- Reading sync provider and independent AlReader WebDAV credentials ---
   emit(SettingInfo::Enum(StrId::STR_SYNC_MECHANISM, &CrossPointSettings::readingSyncProvider,
                          {StrId::STR_PROVIDER_KOREADER, StrId::STR_PROVIDER_ALREADER}, "readingSyncProvider",
                          StrId::STR_CAT_SYSTEM)
            .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
-  emit(SettingInfo::DynamicString(StrId::STR_ALREADER_IDENTIFIER,
-                                  static_cast<SettingInfo::StringGetterFn>(getAlReaderIdentifier),
-                                  static_cast<SettingInfo::StringSetterFn>(setAlReaderIdentifier),
-                                  "alReaderIdentifier", StrId::STR_CAT_SYSTEM)
+  emit(SettingInfo::DynamicString(StrId::STR_ALREADER_WEBDAV_URL,
+                                  static_cast<SettingInfo::StringGetterFn>(getAlReaderWebDavUrl),
+                                  [](void*, const std::string& value) {
+                                    ALREADER_SYNC_SETTINGS.setWebDavUrl(value);
+                                    ALREADER_SYNC_SETTINGS.saveToFile();
+                                  }, "alReaderWebDavUrl", StrId::STR_CAT_SYSTEM)
            .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
+  emit(SettingInfo::DynamicString(StrId::STR_ALREADER_WEBDAV_USERNAME,
+                                  static_cast<SettingInfo::StringGetterFn>(getAlReaderWebDavUsername),
+                                  [](void*, const std::string& value) {
+                                    ALREADER_SYNC_SETTINGS.setWebDavUsername(value);
+                                    ALREADER_SYNC_SETTINGS.saveToFile();
+                                  }, "alReaderWebDavUsername", StrId::STR_CAT_SYSTEM)
+           .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
+  emit(SettingInfo::DynamicString(StrId::STR_ALREADER_WEBDAV_PASSWORD,
+                                  static_cast<SettingInfo::StringGetterFn>(getAlReaderWebDavPassword),
+                                  [](void*, const std::string& value) {
+                                    ALREADER_SYNC_SETTINGS.setWebDavPassword(value);
+                                    ALREADER_SYNC_SETTINGS.saveToFile();
+                                  }, "alReaderWebDavPassword", StrId::STR_CAT_SYSTEM)
+           .withSubcategory(StrId::STR_MENU_SYS_NETWORK).withObfuscated());
   emit(SettingInfo::DynamicToggle(
            StrId::STR_ALREADER_AUTO_ON_CLOSE,
            [](const void*) -> uint8_t { return ALREADER_SYNC_SETTINGS.getAutoSyncOnClose() ? 1u : 0u; },

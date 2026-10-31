@@ -5,7 +5,7 @@
 
 namespace AlReaderSync {
 
-// The AlReader.com service stores a signed sync identifier and a non-negative
+// AlReader stores a signed sync identifier and a non-negative
 // integer `readPositionStart`. APK 1.33 copies this from AlBookEng.bookPosition,
 // which indexes AlReader's parsed mainPartition char[] buffer. It is not a page
 // number or source-file byte offset. Its text-normalization rules have not yet
@@ -21,7 +21,6 @@ enum class Error : uint8_t {
   Transport,
   HttpStatus,
   InvalidReply,
-  LoginRejected,
 };
 
 struct Result {
@@ -40,15 +39,16 @@ struct Result {
 std::string encodePositionRecord(const PositionRecord& record);
 bool decodePositionRecord(const std::string& text, PositionRecord& out);
 
-// HTTPS-only AlReader.com protocol as observed in AlReaderXEInk 1.33. Calls
-// are synchronous and must run in a worker/activity that keeps the UI responsive.
-// They make exactly one request and do not follow redirects.
-class AlReaderComClient {
+// AlReaderXEInk 1.33 WebDAV transport: AlReaderX-01Sync/<book key> contains
+// the UTF-8 position record. These calls run only on the network worker.
+class AlReaderWebDavClient {
  public:
-  static Result registerIdentifier(const std::string& identifier, const std::string& bookKey);
-  static Result fetch(const std::string& identifier, const std::string& bookKey);
-  static Result update(const std::string& identifier, const std::string& bookKey,
-                      const PositionRecord& record);
+  static bool validBaseUrl(const std::string& baseUrl);
+  static Result fetch(const std::string& baseUrl, const std::string& username,
+                      const std::string& password, const std::string& bookKey);
+  static Result update(const std::string& baseUrl, const std::string& username,
+                       const std::string& password, const std::string& bookKey,
+                       const PositionRecord& record);
 };
 
 }  // namespace AlReaderSync
