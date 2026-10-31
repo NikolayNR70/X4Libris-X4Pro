@@ -14,6 +14,7 @@
 #include "ButtonEventManager.h"
 #include "CrossPointSettings.h"
 #include "GfxRenderer.h"
+#include <Epub/Section.h>
 #include "MappedInputManager.h"
 #include "TouchUi.h"
 #include "activities/browser/OpdsBackTo.h"
@@ -168,9 +169,11 @@ class ActivityManager {
   void goToBrowserWithSearch(std::string query);
   void goToReader(std::string path);
   void goToKOReaderSync();
-  void goToAlReaderSync(std::string bookPath, std::string cachePath, std::string bookKey,
+  void goToAlReaderSync(std::shared_ptr<Epub> epub, Section::BuildParams buildParams,
+                        std::string bookPath, std::string cachePath, std::string bookKey,
                         std::string variantSuffix, int spineCount,
-                        int localSpine, uint16_t localPage, uint32_t localPosition, uint8_t intent);
+                        int localSpine, uint16_t localPage, uint32_t localPosition,
+                        uint32_t titlePositionUnits, uint8_t intent);
   // fromTimeout=true marks this as an auto-sleep (used to gate Quick Resume on Timeout).
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

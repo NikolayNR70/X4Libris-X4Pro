@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace AlReaderSync {
 
@@ -23,5 +24,8 @@ class TextPositionCounter {
   uint32_t position_ = 0;
   char16_t lastUnit_ = 0;
 };
+
+// AlReader prepends the FB2 book title to its reading-position stream.
+uint32_t countTitlePositionUnits(std::string_view title);
 
 }  // namespace AlReaderSync

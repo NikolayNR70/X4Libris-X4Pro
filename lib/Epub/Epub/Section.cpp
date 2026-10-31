@@ -484,7 +484,10 @@ std::optional<std::pair<int, uint16_t>> Section::getCachedPageForAlReaderTextPos
     const uint64_t end = start + *length;
     // A position at the exact end of a spine belongs to the next spine.
     // Reject values beyond the book instead of silently jumping to its last page.
-    if (position < end || (spine == spineCount - 1 && position == end)) {
+    // AlReader's parsed-text size has three terminal units after the last
+    // visible character (confirmed by one- and two-chapter EPUB fixtures).
+    // Treat those as the final page, without accepting larger mismatches.
+    if (position < end || (spine == spineCount - 1 && position <= end + 3)) {
       const uint32_t local = position <= start ? 0 : static_cast<uint32_t>(std::min<uint64_t>(position - start, *length));
       const auto page = getPageForAlReaderTextOffsetFromCache(bookCachePath, spine, local, variantSuffix);
       if (!page) return std::nullopt;

@@ -9,6 +9,7 @@
 #include <esp_system.h>
 
 #include <AlReaderBookKey.h>
+#include <AlReaderTextPosition.h>
 #include <Fb2Converter.h>
 
 #include "CrossPointState.h"
@@ -17,11 +18,25 @@
 #include "AlReaderSyncSettings.h"
 #include "KOReaderCredentialStore.h"
 
+#include <cctype>
+#include <string_view>
+
 #ifndef DEBUG_MEMORY_CONSUMPTION
 #define DEBUG_MEMORY_CONSUMPTION 0
 #endif
 
 namespace {
+bool endsWithIgnoreCase(std::string_view path, std::string_view suffix) {
+  if (path.size() < suffix.size()) return false;
+  path.remove_prefix(path.size() - suffix.size());
+  for (size_t i = 0; i < suffix.size(); ++i) {
+    if (std::tolower(static_cast<unsigned char>(path[i])) != suffix[i]) return false;
+  }
+  return true;
+}
+bool isFb2Source(const std::string_view path) {
+  return endsWithIgnoreCase(path, ".fb2") || endsWithIgnoreCase(path, ".fb2.zip");
+}
 #if DEBUG_MEMORY_CONSUMPTION
 void logReaderMemSnapshot(const char* stage) {
   const uint32_t freeHeap = esp_get_free_heap_size();
@@ -54,13 +69,18 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
       activityManager.goToFullScreenMessage("Откройте страницу книги перед синхронизацией AlReader.");
       return;
     }
-    const auto localPosition = Section::getCachedAlReaderTextPosition(
+    const auto bodyPosition = Section::getCachedAlReaderTextPosition(
         epub->getCachePath(), epub->getSpineItemsCount(), alReaderSpine, alReaderPage, variantSuffix);
-    if (!localPosition) {
-      activityManager.goToFullScreenMessage("Сначала откройте эту главу, чтобы подготовить позицию AlReader.");
+    const std::string originalBookPath = Fb2Converter::sourcePath(epub->getPath());
+    const uint32_t titlePositionUnits = isFb2Source(originalBookPath)
+                                            ? AlReaderSync::countTitlePositionUnits(epub->getTitle()) : 0;
+    if (bodyPosition && *bodyPosition > static_cast<uint32_t>(INT32_MAX) - titlePositionUnits) {
+      activityManager.goToFullScreenMessage("Позиция книги слишком велика для AlReader.");
       return;
     }
-    const std::string originalBookPath = Fb2Converter::sourcePath(epub->getPath());
+    // UINT32_MAX asks the sync activity to build missing preceding spine indexes in
+    // short slices before it contacts the service. The current page cache already exists.
+    const uint32_t localPosition = bodyPosition ? *bodyPosition + titlePositionUnits : UINT32_MAX;
     const auto bookKey = AlReaderSync::makeAlReaderBookKeyFromFile(originalBookPath);
     if (bookKey.empty()) {
       activityManager.goToFullScreenMessage("Не удалось определить книгу для синхронизации AlReader.");
@@ -70,8 +90,10 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
     AlIntent intent = AlIntent::COMPARE;
     if (mode == SyncLaunchMode::PULL_REMOTE) intent = AlIntent::PULL_REMOTE;
     if (mode == SyncLaunchMode::PUSH_LOCAL) intent = AlIntent::PUSH_LOCAL;
-    activityManager.goToAlReaderSync(originalBookPath, epub->getCachePath(), bookKey, variantSuffix,
-                                      epub->getSpineItemsCount(), alReaderSpine, alReaderPage, *localPosition,
+    activityManager.goToAlReaderSync(epub, makeSectionBuildParams(), originalBookPath, epub->getCachePath(),
+                                      bookKey, variantSuffix,
+                                      epub->getSpineItemsCount(), alReaderSpine, alReaderPage, localPosition,
+                                      titlePositionUnits,
                                       static_cast<uint8_t>(intent));
     return;
   }

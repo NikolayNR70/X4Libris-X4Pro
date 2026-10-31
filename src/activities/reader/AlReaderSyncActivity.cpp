@@ -23,6 +23,7 @@
 
 namespace {
 constexpr unsigned long kResultHoldMs = 1400;
+constexpr unsigned long kPhaseTimeoutMs = 35000;
 int32_t localSyncId() {
   const auto id = static_cast<int32_t>(ESP.getEfuseMac() & 0x7fffffffULL);
   return id == 0 ? 1 : id;
@@ -30,11 +31,15 @@ int32_t localSyncId() {
 }
 
 AlReaderSyncActivity::AlReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                           std::shared_ptr<Epub> epub, Section::BuildParams buildParams,
                                            std::string bookPath, std::string cachePath, std::string bookKey,
                                            std::string variantSuffix,
                                            const int spineCount, const int localSpine, const uint16_t localPage,
-                                           const uint32_t localPosition, const Intent intent)
+                                           const uint32_t localPosition, const uint32_t titlePositionUnits,
+                                           const Intent intent)
     : Activity("AlReaderSync", renderer, mappedInput),
+      epub_(std::move(epub)),
+      buildParams_(std::move(buildParams)),
       bookPath_(std::move(bookPath)),
       cachePath_(std::move(cachePath)),
       bookKey_(std::move(bookKey)),
@@ -43,6 +48,7 @@ AlReaderSyncActivity::AlReaderSyncActivity(GfxRenderer& renderer, MappedInputMan
       localSpine_(localSpine),
       localPage_(localPage),
       localPosition_(localPosition),
+      titlePositionUnits_(titlePositionUnits),
       intent_(intent) {}
 
 void AlReaderSyncActivity::onEnter() {
@@ -51,10 +57,21 @@ void AlReaderSyncActivity::onEnter() {
     fail("Сначала укажите идентификатор AlReader.com в настройках сети.");
     return;
   }
-  if (bookKey_.empty() || spineCount_ <= 0 || localPosition_ > static_cast<uint32_t>(INT32_MAX)) {
+  if (bookKey_.empty() || !epub_ || spineCount_ <= 0 ||
+      (localPosition_ != UINT32_MAX && localPosition_ > static_cast<uint32_t>(INT32_MAX))) {
     fail("Не удалось подготовить позицию книги для AlReader.");
     return;
   }
+  if (localPosition_ == UINT32_MAX) {
+    phase_ = Phase::PrepareLocal;
+    status_ = "Подготовка позиции книги…";
+    requestUpdate();
+    return;
+  }
+  startNetwork();
+}
+
+void AlReaderSyncActivity::startNetwork() {
   trimMemoryForNetworkSession(renderer, "ARS");
   networkMemoryTrimmed_ = !renderer.hasSecondaryBuffer();
   status_ = "Подключение к AlReader.com…";
@@ -80,6 +97,8 @@ void AlReaderSyncActivity::onEnter() {
 
 void AlReaderSyncActivity::onExit() {
   Activity::onExit();
+  preparationSection_.reset();
+  epub_.reset();
   if (networkMemoryTrimmed_) {
     // The network-session trim deliberately releases the secondary framebuffer. Match the
     // established KOReader path and reboot before rebuilding reader state, restoring clean RAM.
@@ -101,7 +120,98 @@ bool AlReaderSyncActivity::post(const AlReaderSync::Job::Operation operation) {
                ? Phase::Register
                : (operation == AlReaderSync::Job::Operation::FETCH ? Phase::Fetch : Phase::Update);
   waiting = true;
+  phaseStartedAt_ = millis();
   return true;
+}
+
+void AlReaderSyncActivity::prepareStep() {
+  ButtonEventManager::ButtonEvent event;
+  while (buttonEvents.consumeEvent(event)) {
+    if (event.type == ButtonEventManager::PressType::Short &&
+        event.button == MappedInputManager::Button::Back) {
+      preparationSection_.reset();
+      activityManager.goToReader(bookPath_);
+      return;
+    }
+  }
+  const bool remote = phase_ == Phase::PrepareRemote;
+  if (preparationSpine_ >= spineCount_) {
+    fail("Позиция AlReader выходит за пределы книги.");
+    return;
+  }
+
+  const auto length = Section::getAlReaderTextLengthFromCache(cachePath_, preparationSpine_);
+  bool needsBuild = !length;
+  if (length) {
+    const uint64_t end = preparedLength_ + *length;
+    if (end > UINT32_MAX) {
+      fail("Текст книги слишком велик для позиции AlReader.");
+      return;
+    }
+    if (!remote) {
+      if (preparationSpine_ < localSpine_) {
+        preparedLength_ = end;
+        ++preparationSpine_;
+        return;
+      }
+      const auto body = Section::getCachedAlReaderTextPosition(cachePath_, spineCount_, localSpine_,
+                                                               localPage_, variantSuffix_);
+      if (body) {
+        if (*body > static_cast<uint32_t>(INT32_MAX) - titlePositionUnits_) {
+          fail("Позиция книги слишком велика для AlReader.");
+          return;
+        }
+        localPosition_ = *body + titlePositionUnits_;
+        startNetwork();
+        return;
+      }
+      needsBuild = true;
+    } else {
+      const bool target = remoteBodyPosition_ < end ||
+                          (preparationSpine_ == spineCount_ - 1 && remoteBodyPosition_ <= end + 3);
+      if (!target) {
+        preparedLength_ = end;
+        ++preparationSpine_;
+        return;
+      }
+      if (applyRemotePosition(remote_.readPositionStart)) {
+        status_ = "Позиция получена с AlReader.com.";
+        phase_ = Phase::Complete;
+        completedAt_ = millis();
+        requestUpdate();
+        return;
+      }
+      needsBuild = true;
+    }
+  }
+
+  if (!needsBuild) return;
+  if (!preparationSection_) {
+    preparationSection_ = std::make_unique<Section>(epub_, preparationSpine_, renderer);
+    status_ = "Подготовка главы " + std::to_string(preparationSpine_ + 1) + "/" +
+              std::to_string(spineCount_) + "…";
+    requestUpdate();
+  }
+  Section::BuildStep step;
+  {
+    RenderLock lock(*this);
+    step = preparationSection_->stepSectionBuild(buildParams_, 10, {}, true);
+  }
+  if (step == Section::BuildStep::Failed) {
+    preparationSection_.reset();
+    fail("Не удалось подготовить главу для синхронизации AlReader.");
+    return;
+  }
+  if (step == Section::BuildStep::Done) {
+    preparationSection_.reset();
+    const bool validLength = Section::getAlReaderTextLengthFromCache(cachePath_, preparationSpine_).has_value();
+    const bool validPage = !length || (remote
+        ? Section::getCachedPageForAlReaderTextPosition(cachePath_, spineCount_, remoteBodyPosition_,
+                                                        variantSuffix_).has_value()
+        : Section::getCachedAlReaderTextPosition(cachePath_, spineCount_, localSpine_, localPage_,
+                                                  variantSuffix_).has_value());
+    if (!validLength || !validPage) fail("Кэш главы не содержит позицию AlReader.");
+  }
 }
 
 void AlReaderSyncActivity::fail(const std::string& message) {
@@ -113,6 +223,13 @@ void AlReaderSyncActivity::fail(const std::string& message) {
 }
 
 void AlReaderSyncActivity::loop() {
+  if (phase_ == Phase::PrepareLocal || phase_ == Phase::PrepareRemote) {
+    prepareStep();
+    return;
+  }
+  if (waiting && millis() - phaseStartedAt_ >= kPhaseTimeoutMs) {
+    fail("Превышено время ожидания AlReader.com. Проверьте подключение и повторите попытку.");
+  }
   if (waiting && AlReaderSync::Worker::isDone(sequence_)) {
     auto job = AlReaderSync::Worker::consume(sequence_);
     waiting = false;
@@ -165,8 +282,13 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
       }
       if (intent_ == Intent::PULL_REMOTE || intent_ == Intent::COMPARE) {
         if (!applyRemotePosition(remote_.readPositionStart)) {
-          fail("Позиция AlReader получена, но её нельзя точно сопоставить с кэшем книги.");
-          completedAt_ = millis();
+          remoteBodyPosition_ = remote_.readPositionStart > titlePositionUnits_
+                                    ? remote_.readPositionStart - titlePositionUnits_ : 0;
+          preparedLength_ = 0;
+          preparationSpine_ = 0;
+          phase_ = Phase::PrepareRemote;
+          status_ = "Подготовка страницы из AlReader…";
+          requestUpdate();
           return;
         }
         status_ = "Позиция получена с AlReader.com.";
@@ -195,7 +317,9 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
 }
 
 bool AlReaderSyncActivity::applyRemotePosition(const uint32_t position) {
-  const auto target = Section::getCachedPageForAlReaderTextPosition(cachePath_, spineCount_, position, variantSuffix_);
+  const uint32_t bodyPosition = position > titlePositionUnits_ ? position - titlePositionUnits_ : 0;
+  const auto target = Section::getCachedPageForAlReaderTextPosition(cachePath_, spineCount_, bodyPosition,
+                                                                     variantSuffix_);
   if (!target) return false;
   const auto [spine, page] = *target;
   // Progress is persisted before re-opening the existing reader activity. The reader then performs
@@ -229,7 +353,8 @@ void AlReaderSyncActivity::render(RenderLock&&) {
     start = end + 1;
   }
   if (!line.empty()) renderer.drawText(UI_10_FONT_ID, textX, textY, line.c_str());
-  if (phase_ == Phase::Failed || phase_ == Phase::Complete) {
+  if (phase_ == Phase::Failed || phase_ == Phase::Complete || phase_ == Phase::PrepareLocal ||
+      phase_ == Phase::PrepareRemote) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }

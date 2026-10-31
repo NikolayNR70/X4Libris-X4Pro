@@ -572,17 +572,21 @@ void ActivityManager::goToKOReaderSync() {
   replaceActivity(std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, sync.epubPath, local, sync.intent));
 }
 
-void ActivityManager::goToAlReaderSync(std::string bookPath, std::string cachePath, std::string bookKey,
+void ActivityManager::goToAlReaderSync(std::shared_ptr<Epub> epub, Section::BuildParams buildParams,
+                                       std::string bookPath, std::string cachePath, std::string bookKey,
                                        std::string variantSuffix,
                                        const int spineCount, const int localSpine, const uint16_t localPage,
-                                       const uint32_t localPosition, const uint8_t intent) {
+                                         const uint32_t localPosition, const uint32_t titlePositionUnits,
+                                         const uint8_t intent) {
   using Intent = AlReaderSyncActivity::Intent;
   const auto safeIntent = intent <= static_cast<uint8_t>(Intent::PUSH_LOCAL) ? static_cast<Intent>(intent)
                                                                              : Intent::COMPARE;
-  replaceActivity(std::make_unique<AlReaderSyncActivity>(renderer, mappedInput, std::move(bookPath),
+  replaceActivity(std::make_unique<AlReaderSyncActivity>(renderer, mappedInput, std::move(epub),
+                                                          std::move(buildParams), std::move(bookPath),
                                                           std::move(cachePath), std::move(bookKey),
                                                           std::move(variantSuffix), spineCount,
-                                                          localSpine, localPage, localPosition, safeIntent));
+                                                            localSpine, localPage, localPosition,
+                                                            titlePositionUnits, safeIntent));
 }
 
 void ActivityManager::replaceWithReader(std::string path, ReturnHint hint) {

@@ -58,4 +58,15 @@ uint32_t TextPositionCounter::consume(const char* text, const size_t length, con
   return before;
 }
 
+uint32_t countTitlePositionUnits(const std::string_view title) {
+  TextPositionCounter counter;
+  for (size_t offset = 0; offset < title.size();) {
+    size_t bytes = 0;
+    counter.consume(title.data(), title.size(), offset, bytes);
+    if (bytes == 0) break;
+    offset += bytes;
+  }
+  return counter.value();
+}
+
 }  // namespace AlReaderSync
