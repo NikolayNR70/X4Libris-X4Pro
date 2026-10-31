@@ -22,6 +22,9 @@ class AlReaderSyncActivity final : public Activity {
   void onEnter() override;
   void onExit() override;
   bool usesWifi() const override { return true; }
+  // Section preparation still needs the reader's selected SD font. The activity
+  // manager unloads that font when replacing a reader with a non-reader screen.
+  bool isReaderActivity() const override { return true; }
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return waiting || phase_ == Phase::PrepareLocal || phase_ == Phase::PrepareRemote; }
@@ -51,6 +54,8 @@ class AlReaderSyncActivity final : public Activity {
   bool networkMemoryTrimmed_ = false;
   unsigned long completedAt_ = 0;
   unsigned long phaseStartedAt_ = 0;
+  unsigned long preparationStartedAt_ = 0;
+  bool preparationFontUnloaded_ = false;
   std::string status_;
   AlReaderSync::PositionRecord remote_{};
 

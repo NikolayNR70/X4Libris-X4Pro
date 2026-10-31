@@ -18,12 +18,14 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/EpubReaderActivity.h"
 #include "SilentRestart.h"
+#include "SdCardFontGlobals.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
 constexpr unsigned long kResultHoldMs = 1400;
 constexpr unsigned long kPhaseTimeoutMs = 35000;
+constexpr unsigned long kPreparationTimeoutMs = 45000;
 int32_t localSyncId() {
   const auto id = static_cast<int32_t>(ESP.getEfuseMac() & 0x7fffffffULL);
   return id == 0 ? 1 : id;
@@ -64,6 +66,7 @@ void AlReaderSyncActivity::onEnter() {
   }
   if (localPosition_ == UINT32_MAX) {
     phase_ = Phase::PrepareLocal;
+    preparationStartedAt_ = millis();
     status_ = "Подготовка позиции книги…";
     requestUpdate();
     return;
@@ -72,6 +75,13 @@ void AlReaderSyncActivity::onEnter() {
 }
 
 void AlReaderSyncActivity::startNetwork() {
+  // Reflow has finished. Release the book font before Wi-Fi/TLS needs a large
+  // contiguous allocation; reload it only if a remote position needs reflow.
+  {
+    RenderLock lock(*this);
+    unloadSdFontIfLoaded();
+  }
+  preparationFontUnloaded_ = true;
   trimMemoryForNetworkSession(renderer, "ARS");
   networkMemoryTrimmed_ = !renderer.hasSecondaryBuffer();
   status_ = "Подключение к AlReader.com…";
@@ -140,6 +150,11 @@ void AlReaderSyncActivity::prepareStep() {
     }
   }
   const bool remote = phase_ == Phase::PrepareRemote;
+  if (millis() - preparationStartedAt_ >= kPreparationTimeoutMs) {
+    preparationSection_.reset();
+    fail("Подготовка позиции занимает слишком долго. Синхронизация отменена.");
+    return;
+  }
   if (preparationSpine_ >= spineCount_) {
     fail("Позиция AlReader выходит за пределы книги.");
     return;
@@ -192,6 +207,15 @@ void AlReaderSyncActivity::prepareStep() {
 
   if (!needsBuild) return;
   if (!preparationSection_) {
+    if (preparationFontUnloaded_) {
+      RenderLock lock(*this);
+      ensureSdFontLoadedForPath(bookPath_.c_str());
+      preparationFontUnloaded_ = false;
+    }
+    if (renderer.getFontMap().count(buildParams_.fontId) == 0) {
+      fail("Шрифт книги недоступен. Вернитесь к чтению и проверьте выбранный шрифт.");
+      return;
+    }
     preparationSection_ = std::make_unique<Section>(epub_, preparationSpine_, renderer);
     status_ = "Подготовка главы " + std::to_string(preparationSpine_ + 1) + "/" +
               std::to_string(spineCount_) + "…";
@@ -292,6 +316,7 @@ void AlReaderSyncActivity::handleResult(AlReaderSync::Job&& job) {
           preparedLength_ = 0;
           preparationSpine_ = 0;
           phase_ = Phase::PrepareRemote;
+          preparationStartedAt_ = millis();
           status_ = "Подготовка страницы из AlReader…";
           requestUpdate();
           return;
