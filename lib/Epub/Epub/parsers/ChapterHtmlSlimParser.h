@@ -30,6 +30,7 @@
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
 #include "Epub/VisibleText.h"
+#include "../../../AlReaderSync/AlReaderTextPosition.h"
 
 // Page, PageImage and PageLine all come from ../Page.h above.
 class GfxRenderer;
@@ -103,32 +104,49 @@ class ChapterHtmlSlimParser final : public Print {
   // delivered: inside <body>, outside head/script/style, before any layout decision. The mappers
   // count the same stream with the same rule, so a page's recorded start means the same to both.
   uint32_t visibleTextOffset_ = 0;
+  // Independent AlReader coordinate stream: UTF-16 units consumed from accepted chapter text.
+  // This does not reuse the KOReader byte coordinate above.
+  AlReaderSync::TextPositionCounter alReaderTextPosition_;
   int nonVisibleTextDepth_ = 0;         // > 0 inside head, script or style
   uint32_t partWordVisibleOffset_ = 0;  // offset of the byte that opened partWordBuffer
+  uint32_t partWordAlReaderOffset_ = 0;
   uint32_t currentPageVisibleOffset_ = 0;
+  uint32_t currentPageAlReaderOffset_ = 0;
   bool currentPageVisibleOffsetSet_ = false;
   // Pages emitted with no element (nothing but spacing), last in paragraphLutPerPage: they start
   // where the next element does, which noteElementOnPage fills in.
   uint16_t pageStartsAwaitingElement_ = 0;
   // Records the page's start from its first element; later calls on the same page are ignored.
-  void noteElementOnPage(uint32_t offset);
+  void noteElementOnPage(uint32_t offset, uint32_t alReaderOffset = UINT32_MAX);
   // The offset an element placed now stands before. Between SAX chunks that is
   // visibleTextOffset_; inside one the counter already holds the chunk's end, so the text path
   // pins the offset of the word in hand (PinnedPlacement) while it runs code that places
   // elements. UINT32_MAX: nothing pinned.
   uint32_t pinnedPlacementOffset_ = UINT32_MAX;
+  uint32_t pinnedAlReaderPlacementOffset_ = UINT32_MAX;
   uint32_t placementOffset() const {
     return pinnedPlacementOffset_ != UINT32_MAX ? pinnedPlacementOffset_ : visibleTextOffset_;
   }
+  uint32_t alReaderPlacementOffset() const {
+    return pinnedAlReaderPlacementOffset_ != UINT32_MAX ? pinnedAlReaderPlacementOffset_
+                                                        : alReaderTextPosition_.value();
+  }
   struct PinnedPlacement {
-    PinnedPlacement(ChapterHtmlSlimParser& p, const uint32_t offset) : parser(p), saved(p.pinnedPlacementOffset_) {
+    PinnedPlacement(ChapterHtmlSlimParser& p, const uint32_t offset,
+                    const uint32_t alReaderOffset = UINT32_MAX)
+        : parser(p), saved(p.pinnedPlacementOffset_), savedAlReader(p.pinnedAlReaderPlacementOffset_) {
       p.pinnedPlacementOffset_ = offset;
+      p.pinnedAlReaderPlacementOffset_ = alReaderOffset == UINT32_MAX ? p.alReaderPlacementOffset() : alReaderOffset;
     }
-    ~PinnedPlacement() { parser.pinnedPlacementOffset_ = saved; }
+    ~PinnedPlacement() {
+      parser.pinnedPlacementOffset_ = saved;
+      parser.pinnedAlReaderPlacementOffset_ = savedAlReader;
+    }
     PinnedPlacement(const PinnedPlacement&) = delete;
     PinnedPlacement& operator=(const PinnedPlacement&) = delete;
     ChapterHtmlSlimParser& parser;
     uint32_t saved;
+    uint32_t savedAlReader;
   };
   // The body of characterData: lays `s` out. `baseOffset` is the visible-text offset of s[0];
   // `source` says the bytes are chapter text (the running offset advances) rather than text the
@@ -176,6 +194,7 @@ class ChapterHtmlSlimParser final : public Print {
     char text[16] = {};  // drop caps are 1 glyph, occasionally with a leading quote
     int textLen = 0;
     uint32_t visibleOffset = 0;  // offset of the first captured byte
+    uint32_t alReaderOffset = 0;
   };
   PendingDropCap pendingDropCap_;
   PageLine* deferredDropCapLine_ = nullptr;  // borrowed from currentPage; its yPos needs updating
@@ -488,6 +507,7 @@ class ChapterHtmlSlimParser final : public Print {
     uint32_t visibleTextOffset;  // visible bytes of source text before the page's first element
     uint16_t paragraphIndex;     // 1-based <p> index at page completion
     uint16_t listItemIndex;      // running <li> count at page completion (any depth)
+    uint32_t alReaderTextOffset; // UTF-16 units before the page's first element
   };
   std::vector<ParagraphLutEntry> paragraphLutPerPage;  // deep LUT: one entry per page
 
@@ -869,6 +889,7 @@ class ChapterHtmlSlimParser final : public Print {
     if (currentTextBlock) currentTextBlock->releaseLayoutScratch();
   }
   const std::string& getAnchorSpillPath() const { return anchorSpillPath; }
+  uint32_t getAlReaderTextLength() const { return alReaderTextPosition_.value(); }
   size_t pageBreakLabelCount() const { return pageBreakLabelPages.size(); }
   // Heap held by the label record (for the SCT heap trace).
   size_t pageBreakLabelHeapBytes() const {

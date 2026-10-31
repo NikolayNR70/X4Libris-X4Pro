@@ -8,6 +8,7 @@ class CrossPointSettings;
 class CrossPointState;
 class WifiCredentialStore;
 class KOReaderCredentialStore;
+class AlReaderSyncSettings;
 class RecentBooksStore;
 class OpdsServerStore;
 
@@ -28,6 +29,10 @@ bool loadWifi(WifiCredentialStore& store, const char* json, bool* needsResave = 
 // KOReaderCredentialStore
 bool saveKOReader(const KOReaderCredentialStore& store, const char* path);
 bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsResave = nullptr);
+
+// AlReader.com identifier (stored independently from KOReader configuration)
+bool saveAlReader(const AlReaderSyncSettings& settings, const char* path);
+bool loadAlReader(AlReaderSyncSettings& settings, const char* json);
 
 // RecentBooksStore
 bool saveRecentBooks(const RecentBooksStore& store, const char* path);

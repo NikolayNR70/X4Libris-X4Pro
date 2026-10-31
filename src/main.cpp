@@ -41,6 +41,7 @@
 #include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
 #include "KOReaderCredentialStore.h"
+#include "AlReaderSyncSettings.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "ReadingSessionTracker.h"
@@ -1334,6 +1335,7 @@ void setup() {
   timezones::applyToClock();
   I18N.loadSettings();
   KOREADER_STORE.loadFromFile();
+  ALREADER_SYNC_SETTINGS.loadFromFile();
 #if CROSSPOINT_KOREADER_AUTOSYNC
   WIFI_STORE.loadFromFile();
   AUTOSYNC_STATE.loadFromFile();

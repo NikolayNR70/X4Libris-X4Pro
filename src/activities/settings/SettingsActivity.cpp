@@ -191,6 +191,8 @@ void SettingsActivity::onEnter() {
           addTo(librarySettings, enriched);
           break;
         case StrId::STR_SKIP_HTTPS_VALIDATION:
+        case StrId::STR_SYNC_MECHANISM:
+        case StrId::STR_ALREADER_IDENTIFIER:
           addTo(networkSettings, enriched);
           break;
         default:

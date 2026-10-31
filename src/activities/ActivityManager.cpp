@@ -32,6 +32,7 @@
 #include "network/SerialTransferActivity.h"
 #include "network/UsbDriveActivity.h"
 #include "reader/KOReaderSyncActivity.h"
+#include "reader/AlReaderSyncActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/ClockSettingsActivity.h"
 #include "settings/KOReaderSettingsActivity.h"
@@ -569,6 +570,19 @@ void ActivityManager::goToKOReaderSync() {
   local.visibleOffsetAtNextPage = sync.visibleOffsetAtNextPage;
   local.hasVisibleOffset = sync.hasVisibleOffset;
   replaceActivity(std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, sync.epubPath, local, sync.intent));
+}
+
+void ActivityManager::goToAlReaderSync(std::string bookPath, std::string cachePath, std::string bookKey,
+                                       std::string variantSuffix,
+                                       const int spineCount, const int localSpine, const uint16_t localPage,
+                                       const uint32_t localPosition, const uint8_t intent) {
+  using Intent = AlReaderSyncActivity::Intent;
+  const auto safeIntent = intent <= static_cast<uint8_t>(Intent::PUSH_LOCAL) ? static_cast<Intent>(intent)
+                                                                             : Intent::COMPARE;
+  replaceActivity(std::make_unique<AlReaderSyncActivity>(renderer, mappedInput, std::move(bookPath),
+                                                          std::move(cachePath), std::move(bookKey),
+                                                          std::move(variantSuffix), spineCount,
+                                                          localSpine, localPage, localPosition, safeIntent));
 }
 
 void ActivityManager::replaceWithReader(std::string path, ReturnHint hint) {

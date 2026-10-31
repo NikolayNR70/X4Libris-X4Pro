@@ -32,6 +32,7 @@
 #include "components/themes/TapTargets.h"
 
 class EpubReaderActivity final : public Activity {
+  friend class AlReaderSyncActivity;
   // Reader can launch sync in several UX modes:
   // - COMPARE: legacy chooser (apply/upload) for power users.
   // - PULL_REMOTE / PUSH_LOCAL: direct one-step actions from menu entries.

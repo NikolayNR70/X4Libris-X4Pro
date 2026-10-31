@@ -701,6 +701,9 @@ class CrossPointSettings {
   uint8_t guideDots = 0;
   // Expand semantic EPUB footnote references with a short inline preview.
   uint8_t inlineFootnotePreviews = 0;
+  // Selects the single provider used by reader sync actions. 0 preserves the existing
+  // KOReader behavior for upgrades; AlReader configuration remains stored separately.
+  uint8_t readingSyncProvider = 0;
   // Automatically push reading progress to the KOReader sync server when leaving the reader
   // (1 = enabled, 0 = disabled). The push only fires when credentials are configured and the
   // reader session advanced at least koSyncMinSessionPages pages, and is skipped when remote

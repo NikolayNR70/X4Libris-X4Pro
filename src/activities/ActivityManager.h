@@ -168,6 +168,9 @@ class ActivityManager {
   void goToBrowserWithSearch(std::string query);
   void goToReader(std::string path);
   void goToKOReaderSync();
+  void goToAlReaderSync(std::string bookPath, std::string cachePath, std::string bookKey,
+                        std::string variantSuffix, int spineCount,
+                        int localSpine, uint16_t localPage, uint32_t localPosition, uint8_t intent);
   // fromTimeout=true marks this as an auto-sleep (used to gate Quick Resume on Timeout).
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

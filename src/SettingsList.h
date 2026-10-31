@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "AlReaderSyncSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "SdCardFontGlobals.h"
 #include "TouchGestures.h"
@@ -76,6 +77,13 @@ inline std::string getKoReaderServerUrl(void*) { return KOREADER_STORE.getServer
 inline std::string getKoReaderUsername(void*) { return KOREADER_STORE.getUsername(); }
 
 inline std::string getKoReaderPassword(void*) { return KOREADER_STORE.getPassword(); }
+
+inline std::string getAlReaderIdentifier(void*) { return ALREADER_SYNC_SETTINGS.getIdentifier(); }
+
+inline void setAlReaderIdentifier(void*, const std::string& value) {
+  ALREADER_SYNC_SETTINGS.setIdentifier(value);
+  ALREADER_SYNC_SETTINGS.saveToFile();
+}
 
 inline std::string getSleepTimeoutDisplay(void*) {
   const uint8_t v = SETTINGS.sleepTimeoutMinutes;
@@ -710,6 +718,17 @@ inline void buildSettings(const RowSink& emit) {
   // Weather is always available in X4Libris; location and units remain configurable below.
   emit(SettingInfo::Toggle(StrId::STR_APPLICATIONS_FOLDER, &CrossPointSettings::useApplicationsFolder,
                            "useApplicationsFolder", StrId::STR_NONE_OPT));
+
+  // --- Reading sync provider and AlReader.com identifier ---
+  emit(SettingInfo::Enum(StrId::STR_SYNC_MECHANISM, &CrossPointSettings::readingSyncProvider,
+                         {StrId::STR_PROVIDER_KOREADER, StrId::STR_PROVIDER_ALREADER}, "readingSyncProvider",
+                         StrId::STR_CAT_SYSTEM)
+           .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
+  emit(SettingInfo::DynamicString(StrId::STR_ALREADER_IDENTIFIER,
+                                  static_cast<SettingInfo::StringGetterFn>(getAlReaderIdentifier),
+                                  static_cast<SettingInfo::StringSetterFn>(setAlReaderIdentifier),
+                                  "alReaderIdentifier", StrId::STR_CAT_SYSTEM)
+           .withSubcategory(StrId::STR_MENU_SYS_NETWORK));
 
   // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
   emit(SettingInfo::DynamicString(

@@ -4,6 +4,7 @@
 #include <I18n.h>
 
 #include "KOReaderCredentialStore.h"
+#include "AlReaderSyncSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "activities/settings/SettingActionDispatch.h"
@@ -18,6 +19,10 @@ namespace fui = freeink::ui;
 #endif
 
 namespace {
+bool selectedSyncProviderIsConfigured() {
+  return SETTINGS.readingSyncProvider == 1 ? ALREADER_SYNC_SETTINGS.hasIdentifier() : KOREADER_STORE.hasCredentials();
+}
+
 // Three-state cycle helper for overrides represented as int8_t with -1 = default.
 // Mirrors the helpers in QuickOverridesActivity.cpp; kept duplicated rather
 // than extracted so each activity stays self-contained for 16 lines of code.
@@ -104,7 +109,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
 
   visibleTabs[visibleTabCount++] = MenuTab::Navigation;
   visibleTabs[visibleTabCount++] = MenuTab::Settings;
-  if (KOREADER_STORE.hasCredentials()) visibleTabs[visibleTabCount++] = MenuTab::Sync;
+  if (selectedSyncProviderIsConfigured()) visibleTabs[visibleTabCount++] = MenuTab::Sync;
   visibleTabs[visibleTabCount++] = MenuTab::Tools;
 
   navigationItems.push_back(SettingInfo::Action(StrId::STR_SELECT_CHAPTER, SettingAction::None));
@@ -128,7 +133,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
 
   settingsItems.push_back(SettingInfo::Action(StrId::STR_FORMAT_QUICK,SettingAction::None));
 
-  if (KOREADER_STORE.hasCredentials()) {
+  if (selectedSyncProviderIsConfigured()) {
     syncItems.push_back(SettingInfo::Action(StrId::STR_PULL_PROGRESS_FROM_OTHER_DEVICES, SettingAction::None));
     syncItems.push_back(SettingInfo::Action(StrId::STR_PUSH_PROGRESS_FROM_THIS_DEVICE, SettingAction::None));
     // The same comparison a long Confirm press in the reader starts: show which side is further and

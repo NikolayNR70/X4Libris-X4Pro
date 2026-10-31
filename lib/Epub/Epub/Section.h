@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Epub.h"
@@ -165,6 +166,21 @@ class Section {
   // re-inflating the ZIP entry. Says nothing about whether the file exists or is complete;
   // callers must validate its size against the spine's inflated size, as the builder does.
   static std::string sectionHtmlCachePath(const std::string& bookCachePath, int spineIndex);
+  static std::optional<uint32_t> getAlReaderTextLengthFromCache(const std::string& bookCachePath, int spineIndex,
+                                                               const std::string& variantSuffix = {});
+  static std::optional<uint32_t> getAlReaderTextOffsetFromCache(const std::string& bookCachePath, int spineIndex,
+                                                                uint16_t page, const std::string& variantSuffix = {});
+  static std::optional<uint16_t> getPageForAlReaderTextOffsetFromCache(const std::string& bookCachePath,
+                                                                       int spineIndex, uint32_t offset,
+                                                                       const std::string& variantSuffix = {});
+  // Converts a full-book AlReader position to the cached renderer spine/page. Returns nullopt
+  // when any required spine cache is absent, avoiding a guessed percentage/page mapping.
+  static std::optional<std::pair<int, uint16_t>> getCachedPageForAlReaderTextPosition(
+      const std::string& bookCachePath, int spineCount, uint32_t position,
+      const std::string& variantSuffix = {});
+  static std::optional<uint32_t> getCachedAlReaderTextPosition(const std::string& bookCachePath, int spineCount,
+                                                               int spineIndex, uint16_t page,
+                                                               const std::string& variantSuffix = {});
 
   // The page counts recorded for spines [first, last] under `p` (see SpinePageIndex), so the
   // reader can count a chapter split over several spine items without opening their caches.
@@ -405,6 +421,12 @@ class Section {
   // text) answers page 0. How a pulled KOReader position becomes a page. nullopt if the LUT is
   // unavailable or empty.
   std::optional<uint16_t> getPageForVisibleTextOffset(uint32_t offset) const;
+  // Independent AlReader coordinate data stored beside the KOReader LUT. Offsets are UTF-16
+  // units in accepted chapter text; these accessors expose only the current spine-local values.
+  std::optional<uint32_t> getAlReaderTextOffsetForPage(uint16_t page) const;
+  std::optional<uint32_t> getAlReaderTextLength() const;
+  // Filename suffix shared by all spine caches rendered with this section's active settings.
+  std::string getActiveCacheVariantSuffix() const;
 
  private:
   // Allocates buildState_ and runs Setup. Applies the low-heap embedded-CSS downgrade.

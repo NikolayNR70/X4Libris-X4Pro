@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "KOReaderCredentialStore.h"
+#include "CrossPointSettings.h"
 #include "KOReaderDocumentId.h"
 #include "KOReaderSyncMetadata.h"
 #include "KOReaderSyncWorker.h"
@@ -176,18 +177,23 @@ bool KOReaderAutoSync::heapAllowsBackgroundSession(const char* what) {
   return true;
 }
 
-bool KOReaderAutoSync::pullEnabled() { return KOREADER_STORE.hasCredentials() && KOREADER_STORE.getSyncOnWake(); }
+bool KOReaderAutoSync::pullEnabled() {
+  return SETTINGS.readingSyncProvider == 0 && KOREADER_STORE.hasCredentials() && KOREADER_STORE.getSyncOnWake();
+}
 
-bool KOReaderAutoSync::sleepPushEnabled() { return KOREADER_STORE.hasCredentials() && KOREADER_STORE.getSyncOnSleep(); }
+bool KOReaderAutoSync::sleepPushEnabled() {
+  return SETTINGS.readingSyncProvider == 0 && KOREADER_STORE.hasCredentials() && KOREADER_STORE.getSyncOnSleep();
+}
 
 bool KOReaderAutoSync::intervalPushEnabled() {
-  return KOREADER_STORE.hasCredentials() && KOREADER_STORE.getPushIntervalPages() > 0;
+  return SETTINGS.readingSyncProvider == 0 && KOREADER_STORE.hasCredentials() &&
+         KOREADER_STORE.getPushIntervalPages() > 0;
 }
 
 uint64_t KOReaderAutoSync::pushSilentAsync(const std::string& epubPath, const KOReaderPosition& localKoPos,
                                            const int spine, const int page, const std::string& title,
                                            const std::string& authors) {
-  if (!KOREADER_STORE.hasCredentials()) return 0;
+  if (SETTINGS.readingSyncProvider != 0 || !KOREADER_STORE.hasCredentials()) return 0;
   if (!heapAllowsBackgroundSession("Silent push")) return 0;
   KOReaderSyncJob job = buildSilentPushJob(epubPath, localKoPos, spine, page, title, authors);
   if (job.progress.document.empty()) {
@@ -227,7 +233,7 @@ bool KOReaderAutoSync::finalizeSilentPush(const uint64_t seq) {
 
 bool KOReaderAutoSync::stashSleepPush(const std::string& epubPath, const KOReaderPosition& localKoPos, const int spine,
                                       const int page, const std::string& title, const std::string& authors) {
-  if (!KOREADER_STORE.hasCredentials()) return false;
+  if (SETTINGS.readingSyncProvider != 0 || !KOREADER_STORE.hasCredentials()) return false;
   KOReaderSyncJob job = buildSilentPushJob(epubPath, localKoPos, spine, page, title, authors);
   if (job.progress.document.empty() || job.progress.progress.empty()) {
     return false;
@@ -238,6 +244,10 @@ bool KOReaderAutoSync::stashSleepPush(const std::string& epubPath, const KOReade
 }
 
 uint64_t KOReaderAutoSync::pushStashedSleepPushAsync() {
+  if (SETTINGS.readingSyncProvider != 0) {
+    pendingSleepPush = KOReaderSyncJob{};
+    return 0;
+  }
   if (pendingSleepPush.path.empty()) {
     return 0;
   }
@@ -253,6 +263,10 @@ uint64_t KOReaderAutoSync::pushStashedSleepPushAsync() {
 }
 
 void KOReaderAutoSync::joinStashedSleepPush(const uint64_t postedSeq) {
+  if (SETTINGS.readingSyncProvider != 0 && postedSeq == 0) {
+    pendingSleepPush = KOReaderSyncJob{};
+    return;
+  }
   uint64_t seq = postedSeq;
   unsigned long budget = SLEEP_PUSH_JOIN_TIMEOUT_MS;
   if (seq == 0) {

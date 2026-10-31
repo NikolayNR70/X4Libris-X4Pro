@@ -860,6 +860,9 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   // reader; sync's resumeReader() will create the reader once the remote position is applied.
   // Pull-only mode does not need accurate local reader state, so we hand off zeros for spine/page.
   auto& sync = APP_STATE.koReaderSyncSession;
+  if (!sync.autoPullEpubPath.empty() && sync.autoPullEpubPath == epubPath && SETTINGS.readingSyncProvider != 0) {
+    sync.autoPullEpubPath.clear();
+  }
   if (!sync.autoPullEpubPath.empty() && sync.autoPullEpubPath == epubPath && KOREADER_STORE.hasCredentials()) {
     LOG_DBG("READER", "AUTO_PULL on open: %s", epubPath.c_str());
     sync.autoPullEpubPath.clear();  // consume the flag

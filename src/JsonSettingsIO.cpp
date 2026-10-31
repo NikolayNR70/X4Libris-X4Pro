@@ -11,6 +11,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "AlReaderSyncSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "OpdsServerStore.h"
 #include "ReaderStyleChoices.h"
@@ -551,6 +552,27 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   store.showSyncIndicator = doc["showSyncIndicator"] | true;
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
+  return true;
+}
+
+// ---- AlReader.com position sync ----
+
+bool JsonSettingsIO::saveAlReader(const AlReaderSyncSettings& settings, const char* path) {
+  JsonDocument doc;
+  doc["identifier"] = settings.identifier;
+  String json;
+  serializeJson(doc, json);
+  return Storage.writeFile(path, json);
+}
+
+bool JsonSettingsIO::loadAlReader(AlReaderSyncSettings& settings, const char* json) {
+  JsonDocument doc;
+  const auto error = deserializeJson(doc, json);
+  if (error) {
+    LOG_ERR("ARS", "AlReader settings JSON parse error: %s", error.c_str());
+    return false;
+  }
+  settings.setIdentifier(doc["identifier"] | std::string(""));
   return true;
 }
 

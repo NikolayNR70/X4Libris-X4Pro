@@ -903,7 +903,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   }
   // What this places ahead of the word (its list marker, a pending float) stands before the word,
   // wherever in the chunk the flush happens. A table row degraded here pins its own offsets.
-  const PinnedPlacement atWord(*this, partWordVisibleOffset_);
+  const PinnedPlacement atWord(*this, partWordVisibleOffset_, partWordAlReaderOffset_);
 
   // Determine font style from depth-based tracking and CSS effective style
   const bool isBold = boldUntilDepth < depth || effectiveBold;
@@ -1068,13 +1068,15 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   return true;
 }
 
-void ChapterHtmlSlimParser::noteElementOnPage(const uint32_t offset) {
+void ChapterHtmlSlimParser::noteElementOnPage(const uint32_t offset, const uint32_t alReaderOffset) {
   if (currentPageVisibleOffsetSet_) return;
   currentPageVisibleOffset_ = offset;
+  currentPageAlReaderOffset_ = alReaderOffset == UINT32_MAX ? alReaderTextPosition_.value() : alReaderOffset;
   currentPageVisibleOffsetSet_ = true;
   // Empty pages emitted just before this one start where this element does.
   for (size_t i = paragraphLutPerPage.size() - pageStartsAwaitingElement_; i < paragraphLutPerPage.size(); ++i) {
     paragraphLutPerPage[i].visibleTextOffset = offset;
+    paragraphLutPerPage[i].alReaderTextOffset = currentPageAlReaderOffset_;
   }
   pageStartsAwaitingElement_ = 0;
 }
@@ -1088,7 +1090,8 @@ void ChapterHtmlSlimParser::emitPage() {
   // mid-chunk, it could lie past the next page's first word.
   const uint32_t start = currentPageVisibleOffsetSet_ ? currentPageVisibleOffset_ : visibleTextOffset_;
   if (!currentPageVisibleOffsetSet_) pageStartsAwaitingElement_++;  // bounded by MAX_PAGES_PER_SECTION
-  paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex});
+  const uint32_t alReaderStart = currentPageVisibleOffsetSet_ ? currentPageAlReaderOffset_ : alReaderTextPosition_.value();
+  paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex, alReaderStart});
   currentPageVisibleOffsetSet_ = false;
   // Both of these borrow elements of the page being handed off, so they must be dropped
   // before it goes -- and the deferred yPos update is moot on a fresh page anyway (a drop
@@ -1431,7 +1434,7 @@ void ChapterHtmlSlimParser::finalizePendingDropCap() {
   deferredDropCapLine_ = capLine.get();
   // Placed at the span's close, after the captured letters were counted: the cap starts at its
   // first letter.
-  noteElementOnPage(pendingDropCap_.visibleOffset);
+  noteElementOnPage(pendingDropCap_.visibleOffset, pendingDropCap_.alReaderOffset);
   currentPage->elements.push_back(std::move(capLine));
 
   BlockStyle& bs = currentTextBlock->getBlockStyle();
@@ -3122,13 +3125,21 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
 
   // Route drop-cap span text into the capture buffer instead of the word flow.
   if (self->pendingDropCap_.active) {
+    const auto alReaderCounterAtChunkStart = self->alReaderTextPosition_;
     int i = 0;
     bool overflow = false;
     uint32_t byteOff = off;
     for (; i < len; i++) {
       byteOff = off;
+      const uint32_t alReaderByteOff = self->alReaderTextPosition_.value();
       if (source && !VisibleText::isSpace(static_cast<unsigned char>(s[i]))) off++;
-      if (isWhitespace(s[i])) continue;
+      if (isWhitespace(s[i])) {
+        if (source && (static_cast<uint8_t>(s[i]) & 0xC0u) != 0x80u) {
+          size_t consumedBytes = 0;
+          self->alReaderTextPosition_.consume(s, static_cast<size_t>(len), static_cast<size_t>(i), consumedBytes);
+        }
+        continue;
+      }
       // Same reason as in the word flow below: a formatting control must not become the
       // drop cap. A watermarked chapter can open with a run of them.
       if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
@@ -3136,11 +3147,18 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         i += ignorableLen - 1;
         continue;
       }
+      if (source && (static_cast<uint8_t>(s[i]) & 0xC0u) != 0x80u) {
+        size_t consumedBytes = 0;
+        self->alReaderTextPosition_.consume(s, static_cast<size_t>(len), static_cast<size_t>(i), consumedBytes);
+      }
       if (self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;
       }
-      if (self->pendingDropCap_.textLen == 0) self->pendingDropCap_.visibleOffset = byteOff;
+      if (self->pendingDropCap_.textLen == 0) {
+        self->pendingDropCap_.visibleOffset = byteOff;
+        self->pendingDropCap_.alReaderOffset = alReaderByteOff;
+      }
       self->pendingDropCap_.text[self->pendingDropCap_.textLen++] = s[i];
     }
     if (!overflow) return;
@@ -3149,6 +3167,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     self->pendingDropCap_.active = false;
     const int captured = self->pendingDropCap_.textLen;
     self->pendingDropCap_.textLen = 0;
+    self->alReaderTextPosition_ = alReaderCounterAtChunkStart;
     consumeText(userData, self->pendingDropCap_.text, captured, self->pendingDropCap_.visibleOffset, source);
     consumeText(userData, s + i, len - i, byteOff, source);
     return;
@@ -3158,6 +3177,18 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     const uint32_t byteOff = off;
     if (source && !VisibleText::isSpace(static_cast<unsigned char>(s[i]))) off++;
     const unsigned char c = static_cast<unsigned char>(s[i]);
+
+    // Keep the independent AlReader UTF-16 stream in the same accepted SAX text flow.
+    // Markup, skipped nodes, synthetic preview text, and default-ignorable controls do not
+    // advance it. A multibyte UTF-8 code point is counted once, at its leading byte.
+    uint32_t alReaderByteOff = self->alReaderTextPosition_.value();
+    const int ignorableLenAtByte = defaultIgnorableLen(s, i, len);
+    const bool utf8Continuation = (c & 0xC0u) == 0x80u;
+    if (source && !utf8Continuation && ignorableLenAtByte == 0) {
+      size_t consumedBytes = 0;
+      alReaderByteOff = self->alReaderTextPosition_.consume(s, static_cast<size_t>(len), static_cast<size_t>(i),
+                                                            consumedBytes);
+    }
 
     // Fast path for plain ASCII word characters (> 0x20 and < 0x80).
     // This covers the vast majority of characters in Latin-script text.
@@ -3169,7 +3200,10 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         // partial multi-byte sequence can be at the boundary.
         if (!self->flushPartWordBuffer()) return;
       }
-      if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
+      if (self->partWordBufferIndex == 0) {
+        self->partWordVisibleOffset_ = byteOff;
+        self->partWordAlReaderOffset_ = alReaderByteOff;
+      }
       self->partWordBuffer[self->partWordBufferIndex++] = s[i];
       continue;
     }
@@ -3213,7 +3247,8 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // NOTE: this also drops U+200B ZERO WIDTH SPACE, which in correct typography is a break
     // OPPORTUNITY. That is not a regression — isWhitespace() above is ASCII-only, so U+200B has
     // never been a break opportunity in this parser. Making it one is a separate improvement.
-    if (const int ignorableLen = defaultIgnorableLen(s, i, len); ignorableLen > 0) {
+    if (ignorableLenAtByte > 0) {
+      const int ignorableLen = ignorableLenAtByte;
       i += ignorableLen - 1;  // loop's ++i consumes the last byte
       if (source) off += ignorableLen - 1;
       continue;
@@ -3246,6 +3281,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       self->partWordBuffer[1] = '\0';
       self->partWordBufferIndex = 1;
       self->partWordVisibleOffset_ = byteOff;
+      self->partWordAlReaderOffset_ = alReaderByteOff;
       self->nextWordContinues = true;  // Attach space to previous word (no break).
       if (!self->flushPartWordBuffer()) return;
 
@@ -3267,6 +3303,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       self->partWordBuffer[1] = '\0';
       self->partWordBufferIndex = 1;
       self->partWordVisibleOffset_ = byteOff;
+      self->partWordAlReaderOffset_ = alReaderByteOff;
       self->nextWordContinues = true;
       if (!self->flushPartWordBuffer()) return;
 
@@ -3315,12 +3352,16 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         self->partWordBufferIndex = overflow;
         // The saved bytes were counted at their own positions; synthetic text never advanced.
         self->partWordVisibleOffset_ = source ? byteOff - static_cast<uint32_t>(overflow) : byteOff;
+        self->partWordAlReaderOffset_ = alReaderByteOff;
       } else {
         if (!self->flushPartWordBuffer()) return;
       }
     }
 
-    if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
+    if (self->partWordBufferIndex == 0) {
+      self->partWordVisibleOffset_ = byteOff;
+      self->partWordAlReaderOffset_ = alReaderByteOff;
+    }
     self->partWordBuffer[self->partWordBufferIndex++] = s[i];
   }
 }

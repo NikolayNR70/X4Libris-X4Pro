@@ -363,6 +363,22 @@ void EpubReaderActivity::refreshAutoSyncIndicator() {
 }
 
 void EpubReaderActivity::serviceAutoSync() {
+  if (SETTINGS.readingSyncProvider != 0) {
+    // A KOReader job may have been queued before the user changed providers.
+    // Drain its result without applying a KOReader position in AlReader mode.
+    autoSyncPullPending = false;
+    autoSyncPullJobPending = false;
+    if (autoSyncPullSeq != 0 && KOReaderSyncWorker::isDone(autoSyncPullSeq)) {
+      KOReaderSyncWorker::consume(autoSyncPullSeq);
+      autoSyncPullSeq = 0;
+    }
+    pollAutoSyncJob();
+    if (autoSyncIndicator != SyncIndicator::None) {
+      autoSyncIndicator = SyncIndicator::None;
+      requestUpdate();
+    }
+    return;
+  }
   if (autoSyncPullPending) {
     maybeAutoPullOnWake();
   }
@@ -406,6 +422,7 @@ void EpubReaderActivity::releaseAutoSyncSlot() {
 // From onExit(), which ActivityManager runs under the exclusive render lock, so the section and
 // epub reads here are already covered.
 void EpubReaderActivity::maybeAutoPushOnSleep() {
+  if (SETTINGS.readingSyncProvider != 0) return;
   if (epub != nullptr && section != nullptr) {
     AUTOSYNC_STATE.noteProgress(epub->getPath(), currentSpineIndex, section->currentPage);
   }

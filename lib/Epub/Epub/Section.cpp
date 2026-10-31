@@ -31,7 +31,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 83;  // v83: use the one-point built-in font ladder for headings
+constexpr uint8_t SECTION_FILE_VERSION = 84;  // v84: persist separate AlReader UTF-16 page positions
                                               // v81: a paragraph over 96 words gets its top margin and padding
                                               // v79: a <span> styled display:block is a block,
                                               // and every block in a heading keeps its centring
@@ -134,14 +134,56 @@ constexpr uint8_t kStatusCssDegraded = 1 << 3;
 //   heap condition: deterministic, so nothing rebuilds on it (audit R4).
 constexpr uint8_t kStatusSimplified = 1 << 4;
 
-// On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex.
+// On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex + u32 AlReader UTF-16 offset.
 // visibleTextOffset is the number of visible bytes (VisibleText.h) of the chapter's source text
 // before the page's first element: KOReader sync pushes it and resolves pulled positions to a
 // page with it. paragraphIndex and listItemIndex let <p>- and <li>-anchored XPaths snap to a
 // page when a resolver had no offset.
-constexpr uint32_t PARAGRAPH_LUT_ENTRY_SIZE = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint16_t);
+constexpr uint32_t PARAGRAPH_LUT_ENTRY_SIZE = sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint32_t);
 inline uint32_t paragraphLutEntryOffset(uint32_t lutStart, uint16_t page) {
   return lutStart + page * PARAGRAPH_LUT_ENTRY_SIZE;
+}
+
+bool openAnyAlReaderLut(const std::string& bookCachePath, const int spineIndex, FsFile& file, uint16_t& count,
+                        uint32_t& lutStart, const std::string& variantSuffix) {
+  const std::string bucket = Epub::spineCacheDir(bookCachePath, spineIndex);
+  const auto files = Storage.listFiles(bucket.c_str(), 200);
+  const std::string prefix = std::to_string(spineIndex) + "_";
+  for (const auto& entry : files) {
+    const std::string name(entry.c_str());
+    if (name.rfind(prefix, 0) != 0 || name.size() < 5 || name.compare(name.size() - 4, 4, ".bin") != 0) continue;
+    if (!variantSuffix.empty() &&
+        (name.size() < variantSuffix.size() ||
+         name.compare(name.size() - variantSuffix.size(), variantSuffix.size(), variantSuffix) != 0)) continue;
+    const std::string path = bucket + "/" + name;
+    if (!Storage.openFileForRead("SCT", path, file)) continue;
+    uint8_t version = 0;
+    serialization::readPod(file, version);
+    if (version != SECTION_FILE_VERSION || !file.seek(header::kParagraphLut)) {
+      file.close();
+      continue;
+    }
+    uint32_t offset = 0;
+    serialization::readPod(file, offset);
+    if (offset == 0 || offset > file.size() - std::min<uint32_t>(file.size(), sizeof(uint16_t))) {
+      file.close();
+      continue;
+    }
+    if (!file.seek(offset)) {
+      file.close();
+      continue;
+    }
+    serialization::readPod(file, count);
+    const uint64_t needed = sizeof(uint16_t) + static_cast<uint64_t>(count) * PARAGRAPH_LUT_ENTRY_SIZE +
+                            sizeof(uint32_t);
+    if (count == 0 || static_cast<uint64_t>(file.size()) - offset < needed) {
+      file.close();
+      continue;
+    }
+    lutStart = offset + sizeof(uint16_t);
+    return true;
+  }
+  return false;
 }
 }  // namespace
 
@@ -369,6 +411,104 @@ std::string Section::sectionHtmlCachePath(const std::string& bookCachePath, cons
   char buf[32];
   snprintf(buf, sizeof(buf), "/html_%d.bin", spineIndex);
   return Epub::spineCacheDir(bookCachePath, spineIndex) + buf;
+}
+
+std::optional<uint32_t> Section::getAlReaderTextLengthFromCache(const std::string& bookCachePath,
+                                                                const int spineIndex,
+                                                                const std::string& variantSuffix) {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!openAnyAlReaderLut(bookCachePath, spineIndex, f, count, lutStart, variantSuffix)) return std::nullopt;
+  const uint64_t offset = static_cast<uint64_t>(lutStart) + static_cast<uint64_t>(count) * PARAGRAPH_LUT_ENTRY_SIZE;
+  f.seek(static_cast<uint32_t>(offset));
+  uint32_t length = 0;
+  serialization::readPod(f, length);
+  f.close();
+  return length;
+}
+
+std::optional<uint32_t> Section::getAlReaderTextOffsetFromCache(const std::string& bookCachePath,
+                                                                const int spineIndex, const uint16_t page,
+                                                                const std::string& variantSuffix) {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!openAnyAlReaderLut(bookCachePath, spineIndex, f, count, lutStart, variantSuffix) || page >= count) {
+    if (f) f.close();
+    return std::nullopt;
+  }
+  const uint32_t offset = paragraphLutEntryOffset(lutStart, page) + sizeof(uint32_t) + sizeof(uint16_t) +
+                          sizeof(uint16_t);
+  f.seek(offset);
+  uint32_t result = 0;
+  serialization::readPod(f, result);
+  f.close();
+  return result;
+}
+
+std::optional<uint16_t> Section::getPageForAlReaderTextOffsetFromCache(const std::string& bookCachePath,
+                                                                       const int spineIndex,
+                                                                       const uint32_t offset,
+                                                                       const std::string& variantSuffix) {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!openAnyAlReaderLut(bookCachePath, spineIndex, f, count, lutStart, variantSuffix)) return std::nullopt;
+  std::optional<uint16_t> found;
+  for (uint16_t page = 0; page < count; ++page) {
+    const uint32_t entry = paragraphLutEntryOffset(lutStart, page) + sizeof(uint32_t) + sizeof(uint16_t) +
+                           sizeof(uint16_t);
+    f.seek(entry);
+    uint32_t start = 0;
+    serialization::readPod(f, start);
+    if (start > offset) {
+      if (page == 0) found = 0;
+      break;
+    }
+    found = page;
+  }
+  f.close();
+  return found;
+}
+
+std::optional<std::pair<int, uint16_t>> Section::getCachedPageForAlReaderTextPosition(
+    const std::string& bookCachePath, const int spineCount, const uint32_t position,
+    const std::string& variantSuffix) {
+  uint64_t start = 0;
+  for (int spine = 0; spine < spineCount; ++spine) {
+    // Text length belongs to the source chapter, not its current font/layout. A
+    // prior chapter may only have a cache from another pagination variant.
+    const auto length = getAlReaderTextLengthFromCache(bookCachePath, spine, {});
+    if (!length) return std::nullopt;
+    const uint64_t end = start + *length;
+    // A position at the exact end of a spine belongs to the next spine.
+    // Reject values beyond the book instead of silently jumping to its last page.
+    if (position < end || (spine == spineCount - 1 && position == end)) {
+      const uint32_t local = position <= start ? 0 : static_cast<uint32_t>(std::min<uint64_t>(position - start, *length));
+      const auto page = getPageForAlReaderTextOffsetFromCache(bookCachePath, spine, local, variantSuffix);
+      if (!page) return std::nullopt;
+      return std::make_pair(spine, *page);
+    }
+    start = end;
+  }
+  return std::nullopt;
+}
+
+std::optional<uint32_t> Section::getCachedAlReaderTextPosition(const std::string& bookCachePath, const int spineCount,
+                                                               const int spineIndex, const uint16_t page,
+                                                               const std::string& variantSuffix) {
+  if (spineIndex < 0 || spineIndex >= spineCount) return std::nullopt;
+  uint64_t position = 0;
+  for (int spine = 0; spine < spineIndex; ++spine) {
+    const auto length = getAlReaderTextLengthFromCache(bookCachePath, spine, {});
+    if (!length) return std::nullopt;
+    position += *length;
+    if (position > UINT32_MAX) return std::nullopt;
+  }
+  const auto local = getAlReaderTextOffsetFromCache(bookCachePath, spineIndex, page, variantSuffix);
+  if (!local || position + *local > UINT32_MAX) return std::nullopt;
+  return static_cast<uint32_t>(position + *local);
 }
 
 std::string Section::getSectionHtmlCachePath() const { return sectionHtmlCachePath(epub->getCachePath(), spineIndex); }
@@ -1730,7 +1870,8 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     file.write(reinterpret_cast<const uint8_t*>(label), len);
   });
 
-  // Write per-page paragraph LUT: count + array of {visibleTextOffset(u32), paragraphIndex(u16), listItemIndex(u16)}.
+  // Write per-page paragraph LUT, preserving the KOReader fields and adding an independent
+  // AlReader UTF-16 position for the same page boundary.
   const uint32_t paragraphLutOffset = file.position();
   const auto& paragraphLut = visitor.getParagraphLutPerPage();
   if (paragraphLut.size() != static_cast<size_t>(pageCount)) {
@@ -1745,7 +1886,9 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     serialization::writePod(file, entry.visibleTextOffset);
     serialization::writePod(file, entry.paragraphIndex);
     serialization::writePod(file, entry.listItemIndex);
+    serialization::writePod(file, entry.alReaderTextOffset);
   }
+  serialization::writePod(file, visitor.getAlReaderTextLength());
 
   // Patch header with final parseComplete/pageCount and offsets.
   const size_t headerPatchStart = header::kParseComplete;
@@ -2657,7 +2800,8 @@ bool Section::readParagraphLutHeader(FsFile& outFile, uint16_t& outCount, uint32
   }
 
   const uint64_t remainingBytes = static_cast<uint64_t>(fileSize) - paragraphLutOffset;
-  const uint64_t requiredBytes = sizeof(uint16_t) + static_cast<uint64_t>(outCount) * PARAGRAPH_LUT_ENTRY_SIZE;
+  const uint64_t requiredBytes = sizeof(uint16_t) + static_cast<uint64_t>(outCount) * PARAGRAPH_LUT_ENTRY_SIZE +
+                                 sizeof(uint32_t);  // AlReader section text length
   if (remainingBytes < requiredBytes) {
     outFile.close();
     return false;
@@ -2862,4 +3006,50 @@ std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offs
   }
   f.close();
   return found;
+}
+
+std::optional<uint32_t> Section::getAlReaderTextOffsetForPage(const uint16_t page) const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) return std::nullopt;
+  if (page >= count) {
+    f.close();
+    return std::nullopt;
+  }
+  const uint32_t entryOffset = paragraphLutEntryOffset(lutStart, page) + sizeof(uint32_t) +
+                               sizeof(uint16_t) + sizeof(uint16_t);
+  if (static_cast<uint64_t>(entryOffset) + sizeof(uint32_t) > f.size()) {
+    f.close();
+    return std::nullopt;
+  }
+  f.seek(entryOffset);
+  uint32_t offset = 0;
+  serialization::readPod(f, offset);
+  f.close();
+  return offset;
+}
+
+std::string Section::getActiveCacheVariantSuffix() const {
+  const size_t underscore = filePath.find_last_of('_');
+  if (underscore == std::string::npos || filePath.size() - underscore != 13 ||
+      filePath.compare(filePath.size() - 4, 4, ".bin") != 0) return {};
+  return filePath.substr(underscore);
+}
+
+std::optional<uint32_t> Section::getAlReaderTextLength() const {
+  FsFile f;
+  uint16_t count = 0;
+  uint32_t lutStart = 0;
+  if (!readParagraphLutHeader(f, count, lutStart)) return std::nullopt;
+  const uint64_t offset = static_cast<uint64_t>(lutStart) + static_cast<uint64_t>(count) * PARAGRAPH_LUT_ENTRY_SIZE;
+  if (offset + sizeof(uint32_t) > f.size()) {
+    f.close();
+    return std::nullopt;
+  }
+  f.seek(static_cast<uint32_t>(offset));
+  uint32_t length = 0;
+  serialization::readPod(f, length);
+  f.close();
+  return length;
 }

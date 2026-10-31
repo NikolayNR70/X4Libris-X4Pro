@@ -8,8 +8,13 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 
+#include <AlReaderBookKey.h>
+#include <Fb2Converter.h>
+
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
+#include "AlReaderSyncActivity.h"
+#include "AlReaderSyncSettings.h"
 #include "KOReaderCredentialStore.h"
 
 #ifndef DEBUG_MEMORY_CONSUMPTION
@@ -31,6 +36,43 @@ inline void logReaderMemSnapshot(const char*) {}
 void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const SyncPositionOverride* positionOverride,
                                             const SyncPostAction& postAction) {
   if (!epub) {
+    return;
+  }
+
+  // The provider selector routes only explicit, reader-menu/long-press actions. Automatic
+  // close-time sync remains KOReader's existing independent feature and is never redirected.
+  if (mode != SyncLaunchMode::AUTO_PUSH && SETTINGS.readingSyncProvider == 1) {
+    if (!ALREADER_SYNC_SETTINGS.hasIdentifier()) {
+      activityManager.goToFullScreenMessage("Укажите идентификатор AlReader.com в настройках сети.");
+      return;
+    }
+    const int alReaderSpine = positionOverride ? positionOverride->spineIndex : currentSpineIndex;
+    const int currentAlReaderPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
+    const uint16_t alReaderPage = static_cast<uint16_t>(std::max(0, currentAlReaderPage));
+    const std::string variantSuffix = section ? section->getActiveCacheVariantSuffix() : std::string{};
+    if (variantSuffix.empty()) {
+      activityManager.goToFullScreenMessage("Откройте страницу книги перед синхронизацией AlReader.");
+      return;
+    }
+    const auto localPosition = Section::getCachedAlReaderTextPosition(
+        epub->getCachePath(), epub->getSpineItemsCount(), alReaderSpine, alReaderPage, variantSuffix);
+    if (!localPosition) {
+      activityManager.goToFullScreenMessage("Сначала откройте эту главу, чтобы подготовить позицию AlReader.");
+      return;
+    }
+    const std::string originalBookPath = Fb2Converter::sourcePath(epub->getPath());
+    const auto bookKey = AlReaderSync::makeAlReaderBookKeyFromFile(originalBookPath);
+    if (bookKey.empty()) {
+      activityManager.goToFullScreenMessage("Не удалось определить книгу для синхронизации AlReader.");
+      return;
+    }
+    using AlIntent = AlReaderSyncActivity::Intent;
+    AlIntent intent = AlIntent::COMPARE;
+    if (mode == SyncLaunchMode::PULL_REMOTE) intent = AlIntent::PULL_REMOTE;
+    if (mode == SyncLaunchMode::PUSH_LOCAL) intent = AlIntent::PUSH_LOCAL;
+    activityManager.goToAlReaderSync(originalBookPath, epub->getCachePath(), bookKey, variantSuffix,
+                                      epub->getSpineItemsCount(), alReaderSpine, alReaderPage, *localPosition,
+                                      static_cast<uint8_t>(intent));
     return;
   }
 
@@ -113,6 +155,10 @@ bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::strin
                                                      const KOReaderSyncPostAction postAction,
                                                      const std::string& target) {
   auto* self = static_cast<EpubReaderActivity*>(ctx);
+  // The finished-book flow belongs to KOReader and carries a KOReader post-action.
+  // Sending it through the manually selected AlReader provider would discard that
+  // navigation action and could leave the reader at the wrong screen.
+  if (SETTINGS.readingSyncProvider != 0) return false;
   if (!KOREADER_STORE.hasCredentials()) {
     LOG_DBG("ERS", "Finished-book sync requested without credentials; leaving navigation to the caller");
     return false;
@@ -131,6 +177,9 @@ bool EpubReaderActivity::onFinishedBookSyncRequested(void* ctx, const std::strin
 }
 
 bool EpubReaderActivity::tryAutoPushOnClose() {
+  // KOReader's close-time feature must not write to KOReader while the selected
+  // manual sync provider is AlReader. AlReader has its own lifecycle.
+  if (SETTINGS.readingSyncProvider != 0) return false;
   // A page minimum filters out brief inspections — opening to check the cover or skim the TOC
   // shouldn't burn a network round-trip. Counter is per-activity-instance. The threshold is a
   // user setting because what counts as "a real session" differs between someone reading a
