@@ -13,6 +13,7 @@
 #include "SettingActionDispatch.h"
 #include "SettingsList.h"
 #include "SettingsSubmenuActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "TouchUi.h"
 #include "UiFontScale.h"
 #include "components/UITheme.h"
@@ -382,6 +383,25 @@ void SettingsActivity::activateIndex(const int index) {
         needsHalfRefresh = true;
       });
     }
+    return;
+  }
+
+  if (setting.nameId == StrId::STR_ALREADER_IDENTIFIER && setting.type == SettingType::STRING &&
+      setting.stringGetter && setting.stringSetter) {
+    const auto initial = setting.stringGetter(setting.accessorCtx);
+    startActivityForResult(
+        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ALREADER_IDENTIFIER),
+                                                initial, 160, InputType::Text),
+        [this](const ActivityResult& result) {
+          if (!result.isCancelled) {
+            if (const auto* typed = std::get_if<KeyboardResult>(&result.data)) {
+              ALREADER_SYNC_SETTINGS.setIdentifier(typed->text);
+              ALREADER_SYNC_SETTINGS.saveToFile();
+            }
+          }
+          needsHalfRefresh = true;
+          requestUpdate();
+        });
     return;
   }
 

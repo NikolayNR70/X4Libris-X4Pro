@@ -54,6 +54,7 @@ std::string SettingInfo::getDisplayValue() const {
       if (stringGetter) return callStringGetter();
       return std::string(">>");
     case SettingType::STRING:
+      if (nameId == StrId::STR_ALREADER_IDENTIFIER) return std::string(">>");
       return {};
   }
   return {};

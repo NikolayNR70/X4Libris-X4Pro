@@ -100,6 +100,11 @@ void AlReaderSyncActivity::onExit() {
   preparationSection_.reset();
   epub_.reset();
   if (networkMemoryTrimmed_) {
+    // Wi-Fi and TLS leave allocations behind even after a failed or cancelled
+    // session. Match the established KOReader cleanup before restoring the
+    // reader; otherwise the next book runs with a fragmented, reduced heap.
+    WiFi.disconnect(false);
+    delay(30);
     // The network-session trim deliberately releases the secondary framebuffer. Match the
     // established KOReader path and reboot before rebuilding reader state, restoring clean RAM.
     silentRestartToReader();

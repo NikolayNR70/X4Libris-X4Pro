@@ -12,6 +12,8 @@ This document records the isolated `feat/alreader-sync-rebuild-20261031` branch.
 - X4 Pro QEMU booted the candidate and opened synthetic EPUB and FB2 books without firmware log errors. With the first EPUB chapter's page cache deliberately removed and the book saved in chapter two, selecting an AlReader upload rebuilt the missing chapter cache before the Wi-Fi screen. The rebuild was sliced and did not stall the UI.
 - The latest `x4pro_gh_release` build succeeds and produces both an ESP32-S3 app image and factory image. Its app image contains the `CROSSPOINT-BOARD-V1:x4pro;` tag and no X4 tag. The KOReader client, worker and activity have no source diff from the protected v1.0 base.
 - A TLS handshake to `alreader.com` verifies against the firmware's own CA bundle. This checks the current certificate chain on the PC, not the device's HTTPS request.
+- In X4 Pro QEMU, selecting the AlReader provider routes to its own activity; selecting KOReader routes to the existing KOReader activity. The former can rebuild a missing earlier chapter cache, and cancelling Wi-Fi displays a persistent failure before restarting the reader. QEMU's Wi-Fi scan sees no access points, so this is not a network round trip.
+- The device's Network settings now open a text keyboard for the AlReader.com identifier. Previously the row was present but tapping it did nothing. Exiting an AlReader network session now disconnects Wi-Fi before the existing reader restart, matching the KOReader cleanup path. These changes address a reported unusable identifier row and slowdown after leaving reading; physical-device recovery remains to be measured.
 
 ## What still needs verification
 
