@@ -74,6 +74,9 @@ class WifiSelectionActivity final : public Activity {
 
   // Whether to attempt auto-connect on entry
   const bool allowAutoConnect;
+  // Optional bound for callers that cannot remain on an empty AP list indefinitely.
+  const unsigned long noNetworkTimeoutMs;
+  unsigned long enteredAtMs = 0;
 
   // Whether we are attempting to auto-connect
   bool autoConnecting = false;
@@ -156,8 +159,10 @@ class WifiSelectionActivity final : public Activity {
   void onComplete(bool connected);
 
  public:
-  explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = true)
-      : Activity("WifiSelection", renderer, mappedInput), allowAutoConnect(autoConnect) {}
+  explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = true,
+                                 unsigned long emptyNetworkTimeoutMs = 0)
+      : Activity("WifiSelection", renderer, mappedInput), allowAutoConnect(autoConnect),
+        noNetworkTimeoutMs(emptyNetworkTimeoutMs) {}
   void onEnter() override;
   bool usesWifi() const override { return true; }
   void onExit() override;

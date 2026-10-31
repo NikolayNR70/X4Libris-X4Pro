@@ -79,6 +79,7 @@ String formatMacCompact(const uint8_t mac[6]) {
 }  // namespace
 
 void WifiSelectionActivity::onEnter() {
+  enteredAtMs = millis();
   Activity::onEnter();
   const uint32_t eventGeneration = wifiEventGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
@@ -960,6 +961,13 @@ bool WifiSelectionActivity::askForPasswordIfLikelyWrong() {
 }
 
 void WifiSelectionActivity::loop() {
+  if (noNetworkTimeoutMs != 0 && realNetworkCount == 0 &&
+      (state == WifiSelectionState::SCANNING || state == WifiSelectionState::NETWORK_LIST) &&
+      millis() - enteredAtMs >= noNetworkTimeoutMs) {
+    WiFi.scanDelete();
+    onComplete(false);
+    return;
+  }
   // Check scan progress
   if (state == WifiSelectionState::SCANNING) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {

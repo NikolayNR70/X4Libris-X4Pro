@@ -77,7 +77,7 @@ void AlReaderSyncActivity::startNetwork() {
   status_ = "Подключение к AlReader.com…";
   if (WiFi.status() != WL_CONNECTED) {
     status_ = "Подключение к Wi-Fi…";
-    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+    startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, true, 30000),
                            [this](const ActivityResult& result) {
                              if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
                                fail("Подключение к Wi-Fi отменено или не удалось.");
