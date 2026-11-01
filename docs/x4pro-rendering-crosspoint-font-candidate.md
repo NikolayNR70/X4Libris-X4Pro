@@ -3,6 +3,19 @@
 Date: 2026-11-01. Branch `fix/x4pro-crosspoint-vector-render` starts at released
 X4Libris v1.0 (`fdc38cf`). Published `main` and the v1.0 release stay unchanged.
 
+## Upstream baseline update (2026-11-02)
+
+CrossPoint released stable [2.0.0](https://github.com/crosspoint-reader/crosspoint-reader/releases/tag/2.0.0)
+on 2026-11-01 (tag `42d58da`), superseding the 2.0.0rc source used for the
+initial audit. The stable FreeInk submodule is `5e94fe7`. A source diff from
+rc to stable shows no change to `Uc8179Driver.cpp`; the `Uc8179Driver.h`
+change only adds the controller name. Stable `TtfEpdFont.cpp` still requests
+FreeType auto-hinting plus stem darkening, so this candidate's vector-font
+alignment remains relevant. Stable `GfxRenderer.cpp` also fixes per-glyph
+advance rounding and line-height measurement for SD fonts, which can change
+layout but does not by itself explain a delayed physical contrast shift.
+The upstream release does not constitute a verified X4Libris quality fix.
+
 ## Evidence before the edit
 
 - The user's custom CrossPoint X4 Pro `2.0.0rc-fb2` BIN and published X4Libris
