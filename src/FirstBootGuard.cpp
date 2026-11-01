@@ -150,14 +150,15 @@ const esp_partition_t* priorSlot(const esp_partition_t* running) {
 }
 void deadline(void*) {
   if (!probation) return;
-  if (health.healthyAtDeadline(millis())) {
+  const char* failure = health.failureAtDeadline(millis());
+  if (!failure) {
     if (accept()) {
       LOG_INF("BOOT", "Trial accepted after 30 seconds without a startup failure");
       return;
     }
     LOG_ERR("BOOT", "Trial could not be committed; attempting to restore the previous image");
   } else {
-    LOG_ERR("BOOT", "Trial failed: startup did not remain healthy for the 30-second check");
+    LOG_ERR("BOOT", "Trial failed: %s", failure);
   }
   rollback();
 }

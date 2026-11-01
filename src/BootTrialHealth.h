@@ -11,22 +11,28 @@ class BootTrialHealth {
 
  private:
   static constexpr uint32_t kLoopStallLimitMs = 2000;
+  // Book restoration can legitimately block the main loop for several seconds.
+  // Require a sustained recovery before accepting, rather than permanently
+  // condemning an otherwise responsive trial for that one operation.
+  static constexpr uint32_t kRecoveryWindowMs = 5000;
   std::atomic<uint32_t> since{0};
   std::atomic<uint32_t> lastLoopAt{0};
+  std::atomic<uint32_t> lastStallAt{0};
   std::atomic<bool> started{false};
   std::atomic<bool> lastLoopReady{false};
   std::atomic<bool> sawReady{false};
   std::atomic<bool> haveLoop{false};
-  std::atomic<bool> faulted{false};
+  std::atomic<bool> sawStall{false};
 
  public:
   void reset(uint32_t now) {
     since.store(now, std::memory_order_relaxed);
     lastLoopAt.store(now, std::memory_order_relaxed);
+    lastStallAt.store(now, std::memory_order_relaxed);
     lastLoopReady.store(false, std::memory_order_relaxed);
     sawReady.store(false, std::memory_order_relaxed);
     haveLoop.store(false, std::memory_order_relaxed);
-    faulted.store(false, std::memory_order_relaxed);
+    sawStall.store(false, std::memory_order_relaxed);
     started.store(true, std::memory_order_release);
   }
 
@@ -34,8 +40,10 @@ class BootTrialHealth {
     if (!started) reset(now);
     if (haveLoop.load(std::memory_order_acquire)) {
       const uint32_t previousLoop = lastLoopAt.load(std::memory_order_relaxed);
-      if (static_cast<uint32_t>(now - previousLoop) > kLoopStallLimitMs)
-        faulted.store(true, std::memory_order_release);
+      if (static_cast<uint32_t>(now - previousLoop) > kLoopStallLimitMs) {
+        lastStallAt.store(now, std::memory_order_relaxed);
+        sawStall.store(true, std::memory_order_release);
+      }
     }
     lastLoopAt.store(now, std::memory_order_relaxed);
     lastLoopReady.store(ready, std::memory_order_release);
@@ -43,13 +51,21 @@ class BootTrialHealth {
     haveLoop.store(true, std::memory_order_release);
   }
 
-  bool healthyAtDeadline(uint32_t now) const {
-    if (!started.load(std::memory_order_acquire)) return false;
+  const char* failureAtDeadline(uint32_t now) const {
+    if (!started.load(std::memory_order_acquire)) return "health observation never started";
     const uint32_t startAt = since.load(std::memory_order_relaxed);
     const uint32_t lastAt = lastLoopAt.load(std::memory_order_relaxed);
     const bool ready = lastLoopReady.load(std::memory_order_acquire);
-    return !faulted.load(std::memory_order_acquire) && sawReady.load(std::memory_order_acquire) &&
-           static_cast<uint32_t>(now - startAt) >= kHealthyWindowMs && ready &&
-           static_cast<uint32_t>(now - lastAt) <= kLoopStallLimitMs;
+    if (static_cast<uint32_t>(now - startAt) < kHealthyWindowMs) return "trial window not elapsed";
+    if (!sawReady.load(std::memory_order_acquire)) return "no rendered, ready UI";
+    if (!haveLoop.load(std::memory_order_acquire) ||
+        static_cast<uint32_t>(now - lastAt) > kLoopStallLimitMs) return "main loop not responsive";
+    if (!ready) return "UI not ready";
+    if (sawStall.load(std::memory_order_acquire) &&
+        static_cast<uint32_t>(now - lastStallAt.load(std::memory_order_relaxed)) < kRecoveryWindowMs)
+      return "main loop has not recovered for five seconds";
+    return nullptr;
   }
+
+  bool healthyAtDeadline(uint32_t now) const { return failureAtDeadline(now) == nullptr; }
 };
