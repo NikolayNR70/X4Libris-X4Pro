@@ -26,6 +26,17 @@ X4Libris v1.0 (`fdc38cf`). Published `main` and the v1.0 release stay unchanged.
   X4Libris selects `HintingMode::Default`. CrossPoint enables the optional
   auto-hinter in `platformio.ini`; X4Libris did not. This is a concrete
   difference that applies to user-supplied vector fonts.
+- The donor's unscaled 2-bit glyph masks are BW `0x0e`, gray MSB `0x06`,
+  gray LSB `0x04`. X4Libris's default darkness is 0; on UC8179 its overlay
+  selector folding produces the same three masks. Changing the darkness
+  default is therefore not a source-backed way to recover donor rendering.
+- X4Libris's `fastAntiAliasing` setting is implemented only for X3 LUT banks;
+  the display API states it has no effect on X4. It cannot account for the
+  X4 Pro contrast gap. Both images' captured ordinary turns used a 625 ms
+  preconditioning waveform followed by a 150 ms gray activation in QEMU.
+  Reader scheduling differs (CrossPoint stages strips; X4Libris overlaps
+  its plane render with an asynchronous base refresh), so physical charge
+  behavior still requires a device check.
 
 ## Candidate change
 
