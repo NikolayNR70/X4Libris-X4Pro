@@ -100,3 +100,14 @@ Bookerly. The candidate opened the same EPUB with sans-serif glyphs in QEMU
 so the raw SD font selection and runtime vector path were exercised. This is
 still a digital raster check; it does not establish equal optical behavior to
 CrossPoint or remove the user's physical fading report.
+
+An attempted matched-font comparison used the same SD image with both
+`/.crosspoint/settings.json` and `/.x4libris/settings.json`, requesting Ubuntu
+TTF at 14 pt in each reader. The candidate visibly rendered Ubuntu, but the
+user-supplied custom CrossPoint `2.0.0rc-fb2` BIN still rendered its built-in
+Noto Sans. OpenDyslexic OTF produced the same donor fallback. The donor's
+exact build source and font configuration are unavailable, so these emulator
+pages are **not** a controlled same-font contrast comparison. Keep the donor
+screenshots and the candidate screenshot as navigation evidence only. A
+physical comparison must select and verify the identical installed font in
+both firmwares before judging rendering quality.
