@@ -1,5 +1,16 @@
 # X4 Pro UC8179 reading transition candidate
 
+## Physical test result (2026-11-01)
+
+The user reports that the visible page rendering changed very little and that
+the device rolled back after installing this candidate. The new device log is
+not yet available, so the cause of that rollback is unconfirmed. In particular,
+this branch inherited the v1.0 `BootTrialHealth` implementation that can reject
+a responsive boot after a long book-restore iteration; the old behavior must
+not be assumed to explain this particular trial without its log. The candidate
+OTA image has been renamed with `.obsolete-do-not-flash` in the primary record.
+This branch records a failed experiment and must not be offered as an update.
+
 Base: published X4Libris v1.0 source at `fdc38cf`. The v1.0 release asset,
 tag, and `main` remain unchanged. This branch does not use the discarded
 CrossPoint renderer rebase or the abandoned monochrome text-dither experiment.
