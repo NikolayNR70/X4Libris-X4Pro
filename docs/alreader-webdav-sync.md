@@ -11,6 +11,18 @@ The URL must refer to an existing writable root directory; do not append
 upload. The password is stored with the project's device-bound obfuscation and
 is not returned by the web settings API.
 
+## Koofr internet service
+
+Koofr can host the WebDAV folder on the internet without a PC running. Its
+documented endpoint is `https://app.koofr.net/dav/Koofr` on port 443. Create a
+Koofr account and generate an application-specific password in its web app;
+Koofr does not accept the normal account password for WebDAV. In both Android
+AlReader and X4Libris, use that endpoint, the Koofr account email as username,
+and an application password. X4Libris connects directly over Wi-Fi and HTTPS.
+No Koofr credential belongs in the repository or a support log. The firmware
+trust store includes DigiCert Global Root G2, which currently anchors Koofr's
+TLS certificate; certificate and hostname verification remain enabled.
+
 In Android AlReader, use its normal book CRC for the sync filename. The APK
 also offers a simplified filename option for non-AlReader.com providers; when
 enabled, it uses the first 96 Java characters of the book filename (with most
