@@ -141,7 +141,17 @@ for `Ubuntu`. A second SD snapshot adds byte-identical `/fonts/Ubuntu.ttf` so
 the requested name resolves. With that card, the official build uses about
 350 KiB more PSRAM at reader startup and displays visibly different Ubuntu
 glyphs. The same TTF bytes and 14 pt request are therefore available to both
-CrossPoint and the X4Libris candidate. Emulator pages still differ in layout
-and raster treatment, and screenshots cannot prove physical fade, ghosting,
-or panel charge behavior. Do not attribute the user's report to Noto Sans;
-they also observe it with their own fonts.
+CrossPoint and the X4Libris candidate. A second X4Libris run allowed the
+book's background build and grayscale pass to finish, then turned a page.
+Its final screens are in the primary record's
+`artifacts/2026-11-02/candidate-matched-font-emulator/`. The previous
+`candidate-ubuntu-font-emulator/key-open.png` showed only an intermediate
+B/W state. Both settled frames use the same four emulator gray levels
+(16, 48, 81, 239). In the body region, black pixels comprise about 79.7%
+of X4Libris's non-background pixels and 79.5% of CrossPoint's. This coarse
+metric is not glyph-by-glyph equivalence because the layouts differ. Both
+also issue 625 ms preconditioning and 150 ms gray activation on ordinary
+turns in the emulator. These checks cannot prove physical fade, ghosting,
+or panel charge behavior, including the user's reported change after about
+ten seconds. Do not attribute that report to Noto Sans; it also occurs with
+their own fonts.
