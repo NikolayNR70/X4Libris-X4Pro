@@ -536,6 +536,34 @@ static void testUc8179GrayShadeSplit() {
   free(driver._grayBase);
 }
 
+static void testUc8179PostAaAsyncBase() {
+  Uc8179Driver driver;
+  EpdBus bus;
+  driver.begin(bus);
+  const auto first = frame(91), next = frame(37), lsb = frame(13), msb = frame(29);
+  driver.beginGrayscale(bus, first.data(), GrayscaleMode::Overlay, RefreshMode::Half, false);
+  driver.copyGrayscaleLsb(bus, lsb.data());
+  driver.copyGrayscaleMsb(bus, msb.data());
+  driver.displayGray(bus, first.data(), false, nullptr, false);
+  assert(driver._redriveAfterGray && driver._oldPlaneValid && !driver._needFullClear);
+
+  bus.clear();
+  const bool pending = driver.displayStart(bus, next.data(), first.data(), RefreshMode::Fast, false);
+  assert(!pending);  // The OEM transition is complete before gray plane uploads.
+  assert(!driver._pendingRefresh && !driver._redriveAfterGray);
+  assert(driver._oldPlaneValid && driver._bwPlanesSynced);
+  const auto refreshes = std::count_if(bus.writes.begin(), bus.writes.end(),
+                                       [](const auto& w) { return w.command == 0x12; });
+  const auto customLut = std::find_if(bus.writes.begin(), bus.writes.end(),
+                                      [](const auto& w) { return w.command == 0x20; });
+  assert(refreshes == 1 && customLut != bus.writes.end());
+  driver.copyGrayscaleLsb(bus, lsb.data());
+  driver.copyGrayscaleMsb(bus, msb.data());
+  driver.displayGray(bus, next.data(), false, nullptr, false);
+  assert(driver._redriveAfterGray && driver._oldPlaneValid);
+  free(driver._grayBase);
+}
+
 template<class Driver>
 static void testDirectSleep() {
   Driver driver;
@@ -727,6 +755,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   testUc8179GrayShadeSplit();
+  testUc8179PostAaAsyncBase();
   testUc8279X4WaveformSelection();
   testDirectSleep<Uc8179Driver>();
   testDirectSleep<Uc8279X4Driver>();

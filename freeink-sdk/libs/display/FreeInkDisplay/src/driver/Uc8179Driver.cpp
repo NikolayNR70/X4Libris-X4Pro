@@ -343,6 +343,15 @@ void Uc8179Driver::streamPlaneXor(EpdBus& bus, uint8_t ramCmd, const uint8_t* lh
 }
 
 bool Uc8179Driver::displayStart(EpdBus& bus, const uint8_t* fb, const uint8_t* prev, RefreshMode mode, bool turnOff) {
+  // The reader's inline-AA path enters through displayStart(), not display().
+  // A Fast base after grayscale must use the same OEM previous-to-current
+  // transition as the blocking path. Otherwise the ordinary DU partial
+  // bypasses the post-gray transition state entirely.
+  if (mode == RefreshMode::Fast && _redriveAfterGray && _grayRefreshedOnce && _oldPlaneValid && !_needFullClear &&
+      !_directGrayConfigured && !_directGrayOnPanel) {
+    transitionGrayscaleBase(bus, fb, turnOff);
+    return false;  // transitionGrayscaleBase waited for the waveform itself.
+  }
   const bool paintDestination = _directGrayOnPanel;
   _directGrayOnPanel = false;
   restoreBwConfiguration(bus);
