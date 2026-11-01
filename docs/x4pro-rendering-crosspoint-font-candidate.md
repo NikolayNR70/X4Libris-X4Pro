@@ -76,3 +76,7 @@ a candidate boot regression. After a longer emulator wait, the candidate
 displayed its normal home screen (`key-late.png` in the local artifact folder).
 The scripted book navigation still has not yielded a valid custom-font reader
 comparison.
+With longer waits, the candidate also entered the library and displayed the
+test book folder (`key-library-late.png`, `key-books.ppm`). The final snapshot
+was taken while the library showed `Indexing`; it is not evidence of a
+completed book open. Reader-font testing remains open.
