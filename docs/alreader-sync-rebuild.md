@@ -31,3 +31,10 @@ This document records the isolated `feat/alreader-sync-rebuild-20261031` branch.
 - Physical X4 Pro timing and memory behavior, especially on a large book with many unopened chapters. The current missing-chapter recovery builds renderer caches in short slices, which is bounded per loop but can take time across a large book.
 
 No candidate binary should replace the published v1.0 until these checks pass.
+
+## Koofr WebDAV emulator check, 2026-11-01
+
+- The user chose Koofr's internet HTTPS WebDAV and asked to test in the X4 Pro emulator first. The physical device remains on v1.0. The Koofr root has an `AlReaderX-01Sync` folder; no credentials are stored in this repository.
+- `x4pro_gh_release` builds the physical OTA candidate with the normal 30-second rollback guard. The emulator's synthetic flash lacks a verified previous OTA slot, so that candidate rebooted at the guard deadline. The separate `x4pro_webdav_emulator` environment defines `X4LIBRIS_EMULATOR_ONLY`, which disables the rollback guard in that build alone. Never flash its output to hardware.
+- The emulator-only app image built successfully (`5,530,352` bytes; SHA-256 `5CDDEA3A02384FA3C1631729C4BD5A59ADF0C4D6286ABDB8B0918A88F6C09E0C`; ESP32-S3 image checksum and validation hash valid). It booted to the home screen and exposed independent KOReader/AlReader WebDAV controls in Network settings. QEMU 0.8.0 with NAT Wi-Fi discovered three virtual APs. A first connection attempt to its open `PICSimLabWiFi` AP triggered a software reset after the connecting screen; whether it had associated and whether outbound HTTPS works is not yet established.
+- Next: establish the emulator Wi-Fi connection and inspect its logs; have the user enter their Koofr account email and app password directly in the emulator, then compare a fresh position of the same book in both directions with Android AlReader. Do not describe the exchange as working before those checks.

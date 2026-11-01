@@ -16,7 +16,7 @@
 #include "network/OtaBootSwitch.h"
 
 namespace FirstBootGuard {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_DEVICE_X4PRO && !defined(X4LIBRIS_EMULATOR_ONLY)
 namespace {
 constexpr uint32_t MAGIC = 0x31474246;
 constexpr uint32_t RESET_WINDOW_MAGIC = 0x58475231;
