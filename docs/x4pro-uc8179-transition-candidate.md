@@ -3,12 +3,15 @@
 ## Physical test result (2026-11-01)
 
 The user reports that the visible page rendering changed very little and that
-the device rolled back after installing this candidate. The new device log is
-not yet available, so the cause of that rollback is unconfirmed. In particular,
-this branch inherited the v1.0 `BootTrialHealth` implementation that can reject
-a responsive boot after a long book-restore iteration; the old behavior must
-not be assumed to explain this particular trial without its log. The candidate
-OTA image has been renamed with `.obsolete-do-not-flash` in the primary record.
+the device rolled back after installing this candidate. In the supplied
+`system.log`, the 31.456-second entry states `Trial failed: startup did not
+remain healthy for the 30-second check`, followed by an OTA slot switch. There
+is no panic or crash entry at that point. This branch inherited the v1.0
+`BootTrialHealth` implementation that permanently rejects a long main-loop
+iteration, even after the book and UI recover. The log confirms the rejection
+by that health gate, although it does not expose which internal condition of
+the gate failed. The candidate OTA image has been renamed with
+`.obsolete-do-not-flash` in the primary record.
 This branch records a failed experiment and must not be offered as an update.
 
 Base: published X4Libris v1.0 source at `fdc38cf`. The v1.0 release asset,
