@@ -18,6 +18,7 @@
 #define DEBUG_BACKGROUND_WORK 0
 #endif
 
+#include <BoardConfig.h>
 #include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
@@ -5579,6 +5580,16 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   }
   const bool inlineAaThisRender =
       aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable && !aaPreempted;
+  // UC8179's public CrossPoint reader completes the B/W base before uploading
+  // the two AA planes. Keep that sequence on X4 Pro/UC8179 instead of the
+  // interleaved async path; displayBuffer() also reaches the driver's existing
+  // post-gray previous-to-current transition on the next Fast page.
+  const bool uc8179SequentialAa =
+#if FREEINK_DEVICE_X4PRO
+      inlineAaThisRender && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
+#else
+      false;
+#endif
   // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
   const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
@@ -5600,6 +5611,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.triggerGrayscaleFrame(pageRefreshMode);
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.textAntiAliasing = true;
+  } else if (uc8179SequentialAa) {
+    renderer.displayBuffer(pageRefreshMode);
   } else if (inlineAaThisRender) {
     renderer.triggerDisplayAsync(pageRefreshMode);
   } else {
@@ -5632,6 +5645,27 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.textAntiAliasing = true;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, millis() - t0};
+  } else if (uc8179SequentialAa) {
+    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
+    const int aaFontId = getEffectiveReaderFontId();
+    const Page* pagePtr = page.get();
+    bool planeAborted = false;
+    const auto gt = renderer.renderGrayscalePlanesSequential(
+        [&](GfxRenderer::RenderMode) {
+          if (!pagePtr->renderTextOnly(renderer, aaFontId, orientedMarginLeft, contentTop, /*abortable=*/true)) {
+            planeAborted = true;
+            return;
+          }
+          pagePtr->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        },
+        [&] { return planeAborted || aaPreemptedByNavigation(); });
+    LOG_DBG("ERS", "UC8179 sequential AA%s: planes=%lums gray=%lums restore=%lums",
+            gt.aborted ? " ABORTED" : "", gt.planesMs, gt.displayMs, gt.restoreMs);
+    checkHeapIntegrity("after_uc8179_sequential_aa");
+    lastRenderStats.usedGrayscale = !gt.aborted;
+    lastRenderStats.textAntiAliasing = !gt.aborted;
+    lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, gt.planesMs, 0,
+                              gt.displayMs, gt.restoreMs, millis() - t0};
   } else if (inlineAaThisRender) {
     // Inline AA (X4): the BW waveform is still running from triggerDisplayAsync().
     // Render the grayscale planes now — the LSB plane lands inside the waveform
