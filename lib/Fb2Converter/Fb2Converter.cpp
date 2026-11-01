@@ -37,6 +37,8 @@ p { text-indent: 1.2em; margin-top: 0; margin-bottom: 0; }
 .fb2-stanza { margin-top: 0.5em; margin-bottom: 0.5em; }
 .fb2-verse { text-indent: 0; text-align: left; }
 .fb2-empty-line { text-indent: 0; margin-top: 0; margin-bottom: 0; }
+.fb2-annotation { margin-bottom: 1em; }
+.fb2-annotation p { text-indent: 0; margin-bottom: 0.5em; }
 )CSS";
 constexpr size_t MAX_CHAPTERS = 512, MAX_IDS = 4096, MAX_IMAGES = 256;
 constexpr uint32_t CRC32_NIBBLE_TABLE[16] = {
@@ -172,6 +174,29 @@ struct Converter {
   size_t binaryBytes = 0;
   std::string capture, captured, metadataName, metadataNickname;
 
+  void appendAnnotationText(const char* s, int n) {
+    if (!metadataAnnotationDepth) return;
+    for (int i = 0; i < n && metadataDescription.size() < 16384; ++i) {
+      const unsigned char ch = static_cast<unsigned char>(s[i]);
+      if (isspace(ch)) {
+        if (!metadataDescription.empty() && metadataDescription.back() != ' ' && metadataDescription.back() != '\n')
+          metadataDescription += ' ';
+      } else {
+        metadataDescription += static_cast<char>(ch);
+      }
+    }
+  }
+
+  void endAnnotationElement(const std::string& name) {
+    if (metadataAnnotationDepth && (name == "p" || name == "v" || name == "empty-line")) {
+      if (!metadataDescription.empty() && metadataDescription.back() == ' ') metadataDescription.pop_back();
+      if (metadataDescription.size() < 16384 && !metadataDescription.empty() && metadataDescription.back() != '\n')
+        metadataDescription += '\n';
+    }
+    if (name == "annotation" && static_cast<int>(stack.size()) == metadataAnnotationDepth)
+      metadataAnnotationDepth = 0;
+  }
+
   void fail(const char* e) {
     if (error.empty()) error = e;
   }
@@ -219,6 +244,19 @@ struct Converter {
           "xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>" +
           escape(chapters[chapter].title) +
           "</title><link rel=\"stylesheet\" type=\"text/css\" href=\"fb2.css\"/></head><body>");
+      if (chapter == 0 && !metadataDescription.empty()) {
+        out.put("<div class=\"fb2-annotation\">");
+        size_t start = 0;
+        while (start < metadataDescription.size()) {
+          const size_t end = metadataDescription.find('\n', start);
+          const std::string paragraph = metadataDescription.substr(
+              start, end == std::string::npos ? std::string::npos : end - start);
+          if (!paragraph.empty()) out.put("<p>" + escape(paragraph) + "</p>");
+          if (end == std::string::npos) break;
+          start = end + 1;
+        }
+        out.put("</div>");
+      }
     }
     active = true;
   }
@@ -302,6 +340,8 @@ struct Converter {
       f.sourceStyle = attr(a, "style");
     }
     if (n == "title-info") titleInfoDepth = static_cast<int>(stack.size()) + 1;
+    if (wantMetadataDescription && titleInfoDepth && n == "annotation")
+      metadataAnnotationDepth = static_cast<int>(stack.size()) + 1;
     if (n == "stylesheet" && !render) {
       capturingStylesheet = true;
       embeddedCss.clear();
@@ -437,13 +477,7 @@ struct Converter {
     if (stack.empty() || !error.empty()) return;
     if (metadataOnly) {
       const auto name = stack.back().name;
-      if (metadataAnnotationDepth && (name == "p" || name == "v" || name == "empty-line")) {
-        if (!metadataDescription.empty() && metadataDescription.back() == ' ') metadataDescription.pop_back();
-        if (metadataDescription.size() < 16384 && !metadataDescription.empty() && metadataDescription.back() != '\n')
-          metadataDescription += '\n';
-      }
-      if (name == "annotation" && static_cast<int>(stack.size()) == metadataAnnotationDepth)
-        metadataAnnotationDepth = 0;
+      endAnnotationElement(name);
       if (name == capture && titleInfoDepth) {
         auto first = captured.find_first_not_of(" \t\r\n");
         auto last = captured.find_last_not_of(" \t\r\n");
@@ -474,6 +508,7 @@ struct Converter {
     }
     if (stack.back().deferredParagraph) openDeferredParagraph(false);
     const auto f = stack.back();
+    endAnnotationElement(f.name);
     if (f.name == capture && titleInfoDepth) {
       if (!render) {
         if (capture == "book-title")
@@ -516,21 +551,12 @@ struct Converter {
   void chars(const char* s, int n) {
     if (!error.empty()) return;
     if (metadataOnly) {
-      if (metadataAnnotationDepth) {
-        for (int i = 0; i < n && metadataDescription.size() < 16384; ++i) {
-          const unsigned char ch = static_cast<unsigned char>(s[i]);
-          if (isspace(ch)) {
-            if (!metadataDescription.empty() && metadataDescription.back() != ' ' && metadataDescription.back() != '\n')
-              metadataDescription += ' ';
-          } else {
-            metadataDescription += static_cast<char>(ch);
-          }
-        }
-      }
+      appendAnnotationText(s, n);
       if (!capture.empty() && captured.size() < 2048)
         captured.append(s, std::min<size_t>(n, 2048 - captured.size()));
       return;
     }
+    appendAnnotationText(s, n);
     if (render && binary >= 0) {
       for (int i = 0; i < n; ++i) {
         const unsigned char c = s[i];
@@ -1290,9 +1316,13 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
 
   const size_t sourceHash = std::hash<std::string>{}(source);
   char key[64];
-  snprintf(key, sizeof(key), "fb2-reader-v3-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
+  snprintf(key, sizeof(key), "fb2-reader-v4-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
            static_cast<unsigned long>(book.sourceCrc));
   book.cacheDir = FsHelpers::unpackCachePath(key, static_cast<uint32_t>(sourceHash));
+  char oldKey[64];
+  snprintf(oldKey, sizeof(oldKey), "fb2-reader-v3-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
+           static_cast<unsigned long>(book.sourceCrc));
+  const std::string previousCacheDir = FsHelpers::unpackCachePath(oldKey, static_cast<uint32_t>(sourceHash));
   if (!FsHelpers::prepareBookCachePath(book.cacheDir)) {
     error = "Cannot prepare FB2 cache folder on SD card";
     return false;
@@ -1326,6 +1356,7 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
   }
   auto& converter = *holder;
   converter.dir = book.cacheDir;
+  converter.wantMetadataDescription = true;
   HalFile extractedSource;
   HalFile* parseSource = &src;
   uint32_t parseSourceSize = archiveSize;
@@ -1346,6 +1377,8 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
   uint32_t finalSize = 0, finalCrc = 0;
   if (ok) {
     converter.render = true;
+    converter.wantMetadataDescription = false;
+    converter.metadataAnnotationDepth = 0;
     converter.nextChapter = 0;
     converter.bodyDepth = 0;
     converter.sectionDepth = 0;
@@ -1407,6 +1440,15 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
     if (error.empty()) error = converter.error.empty() ? "FB2 reader preparation failed" : converter.error;
     Storage.removeDir(book.cacheDir.c_str());
     return false;
+  }
+  // Keep the v3 cache intact for firmware rollback. Copy the user's durable
+  // reading state to the new layout only after its XHTML and index are valid.
+  for (const char* name : {"progress.bin", "bookmarks.bin", "linkstack.bin", "kosync_push.bin"}) {
+    const std::string oldPath = previousCacheDir + "/" + name;
+    const std::string newPath = book.cacheDir + "/" + name;
+    if (Storage.exists(oldPath.c_str()) && !Storage.exists(newPath.c_str()) &&
+        !Storage.copyFile("FB2", oldPath, newPath.c_str()))
+      LOG_ERR("FB2", "Could not preserve %s for the new reader cache", name);
   }
   return true;
 }

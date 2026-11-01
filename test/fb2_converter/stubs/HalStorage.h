@@ -90,6 +90,10 @@ struct TestStorage {
     return true;
   }
   bool remove(const char* p) { return fs::remove(physical(p)); }
+  bool copyFile(const char*, const std::string& source, const char* destination) {
+    std::error_code error;
+    return fs::copy_file(physical(source), physical(destination), fs::copy_options::none, error) && !error;
+  }
   bool renameNoReplace(const char* a, const char* b) {
     if (std::getenv("FB2_TEST_RACE") && std::string(b).size() >= 5 &&
         std::string(b).substr(std::string(b).size() - 5) == ".epub") {
