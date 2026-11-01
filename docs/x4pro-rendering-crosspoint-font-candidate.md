@@ -76,7 +76,8 @@ a candidate boot regression. After a longer emulator wait, the candidate
 displayed its normal home screen (`key-late.png` in the local artifact folder).
 The scripted book navigation still has not yielded a valid custom-font reader
 comparison.
-With longer waits, the candidate also entered the library and displayed the
-test book folder (`key-library-late.png`, `key-books.ppm`). The final snapshot
-was taken while the library showed `Indexing`; it is not evidence of a
-completed book open. Reader-font testing remains open.
+With longer waits, the candidate entered the library, displayed the test book
+folder and then opened and paged the EPUB (`key-library-late.png`,
+`key-books.ppm`, `indexed-open.png`). This establishes a basic EPUB reader
+smoke check in QEMU. The test used the default built-in font, so it does not
+exercise the changed runtime vector-font path or verify physical contrast.
