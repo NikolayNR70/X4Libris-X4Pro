@@ -30,6 +30,7 @@ const esp_partition_t* previous = nullptr;
 std::atomic<bool> probation{false};
 BootTrialHealth health;
 esp_timer_handle_t timer = nullptr;
+bool uiWaitLogged = false;
 uint8_t runningHash[32]{};
 uint32_t resetWindowChecksum(uint64_t startedAtUs) {
   return RESET_WINDOW_MAGIC ^ static_cast<uint32_t>(startedAtUs) ^
@@ -150,14 +151,23 @@ const esp_partition_t* priorSlot(const esp_partition_t* running) {
 }
 void deadline(void*) {
   if (!probation) return;
-  const char* failure = health.failureAtDeadline(millis());
+  const uint32_t now = millis();
+  const char* failure = health.failureAtDeadline(now);
   if (!failure) {
     if (accept()) {
-      LOG_INF("BOOT", "Trial accepted after 30 seconds without a startup failure");
+      LOG_INF("BOOT", "Trial accepted after %lu ms with a responsive UI", static_cast<unsigned long>(health.elapsedMs(now)));
       return;
     }
     LOG_ERR("BOOT", "Trial could not be committed; attempting to restore the previous image");
   } else {
+    if (health.mayWaitForUi(now)) {
+      if (!uiWaitLogged) {
+        LOG_INF("BOOT", "Trial check: %s; waiting for UI, at most 60 seconds total", failure);
+        uiWaitLogged = true;
+      }
+      if (esp_timer_start_once(timer, 1000000ULL) == ESP_OK) return;
+      LOG_ERR("BOOT", "Trial check could not be rescheduled");
+    }
     LOG_ERR("BOOT", "Trial failed: %s", failure);
   }
   rollback();
@@ -191,6 +201,7 @@ void begin() {
   }
   probation=true;
   health.reset(millis());
+  uiWaitLogged = false;
   startResetWindow();
   // A different image starts a new recovery window.
   clearResetGrace();

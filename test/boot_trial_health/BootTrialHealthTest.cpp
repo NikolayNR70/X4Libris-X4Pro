@@ -38,6 +38,18 @@ int main() {
   rendering.reset(0);
   for (uint32_t t = 100; t <= 30000; t += 100) rendering.observe(t, t < 29900);
   assert(!rendering.healthyAtDeadline(30000));
+  assert(rendering.mayWaitForUi(30000));
+  for (uint32_t t = 30100; t <= 36000; t += 100) rendering.observe(t, t >= 35000);
+  assert(rendering.healthyAtDeadline(36000));
+
+  BootTrialHealth neverFinished;
+  neverFinished.reset(0);
+  for (uint32_t t = 100; t <= 30000; t += 100) neverFinished.observe(t, false);
+  assert(neverFinished.mayWaitForUi(30000));
+  for (uint32_t t = 30100; t <= 60000; t += 100) neverFinished.observe(t, false);
+  assert(!neverFinished.mayWaitForUi(60000));
+  assert(!neverFinished.healthyAtDeadline(60000));
+  assert(!hung.mayWaitForUi(30000));
 
   // Unsigned tick arithmetic must remain correct across millis() wraparound.
   BootTrialHealth wrapped;

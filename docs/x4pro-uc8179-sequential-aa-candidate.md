@@ -2,12 +2,29 @@
 
 ## Physical trial update (2026-11-01)
 
-The user reports that this second test image also rolled back. The SD card
-with the new boot logs is not currently mounted, so the failure mode of this
-trial cannot yet be attributed to the boot guard, a crash, or another cause.
-The OTA file has been renamed with `.obsolete-do-not-flash` in the primary
-record. Do not recommend reflashing this image. Diagnose the new logs before
-making another firmware candidate.
+The user reports that this second test image also rolled back. Fresh
+`system.log` shows `Trial failed: UI not ready` at 31.455 seconds, followed by
+the OTA slot switch. At 27.715 seconds the reader began a render after an
+incremental FB2 section build. This is a strict-deadline boot-guard rejection,
+not a logged panic. The old OTA file has been renamed with
+`.obsolete-do-not-flash` in the primary record; do not recommend reflashing it.
+The follow-up branch `fix/x4pro-boot-trial-bounded-ui` retries the health check
+for at most another 30 seconds while the main loop remains responsive. It
+still rolls back an unresponsive loop immediately and a perpetually unfinished
+UI by 60 seconds. This changes trial timing, not the AA reader path.
+
+The follow-up build passed for `x4pro_gh_release`: 5,496,821 / 6,553,600
+flash bytes (83.9%) and 110,160 / 327,680 RAM bytes (33.6%). Its
+5,501,824-byte OTA app is 272 bytes larger than the preceding test image and
+928 bytes larger than released v1.0. SHA-256:
+`1E6465E202E6F9E08E1AD771DD23153E23C4CF6F3DB4C5784D01BF8E4D3F9D59`.
+Esptool validates the ESP32-S3 image header, checksum and validation hash.
+The host trial-health test covers a rendering pass that finishes after 30
+seconds, an unfinished UI at 60 seconds, a stalled main loop, and the existing
+book-restore and wraparound cases. An ESP-IDF timer test in the locally
+installed framework exercises restarting a one-shot timer from its callback.
+The updated image has not been tested on the physical panel; no claim about
+contrast or boot acceptance follows from the build.
 
 Base: published X4Libris v1.0 source `fdc38cf`. This branch has not changed
 the v1.0 release, tag, or `main`.

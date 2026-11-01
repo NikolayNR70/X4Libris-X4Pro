@@ -8,6 +8,7 @@
 class BootTrialHealth {
  public:
   static constexpr uint32_t kHealthyWindowMs = 30000;
+  static constexpr uint32_t kMaxUiWaitMs = 60000;
 
  private:
   static constexpr uint32_t kLoopStallLimitMs = 2000;
@@ -68,4 +69,17 @@ class BootTrialHealth {
   }
 
   bool healthyAtDeadline(uint32_t now) const { return failureAtDeadline(now) == nullptr; }
+
+  uint32_t elapsedMs(uint32_t now) const {
+    return static_cast<uint32_t>(now - since.load(std::memory_order_relaxed));
+  }
+
+  // A new render can be in progress exactly at the 30-second deadline. Give a
+  // responsive main loop a bounded chance to finish it; an actual hang still
+  // fails immediately, and a perpetually unfinished UI fails by 60 seconds.
+  bool mayWaitForUi(uint32_t now) const {
+    if (!started.load(std::memory_order_acquire) || elapsedMs(now) >= kMaxUiWaitMs ||
+        !haveLoop.load(std::memory_order_acquire)) return false;
+    return static_cast<uint32_t>(now - lastLoopAt.load(std::memory_order_relaxed)) <= kLoopStallLimitMs;
+  }
 };
