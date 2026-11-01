@@ -155,3 +155,26 @@ turns in the emulator. These checks cannot prove physical fade, ghosting,
 or panel charge behavior, including the user's reported change after about
 ten seconds. Do not attribute that report to Noto Sans; it also occurs with
 their own fonts.
+
+## UC8179 path audit
+
+Compared the stable CrossPoint and X4Libris UC8179 drivers directly. The
+driver's display, preconditioning, gray-plane and power-off code is identical;
+the only `.cpp` differences are transaction API calls (`Transaction::writeBytes`
+versus `beginTxn` / `rawWriteBytes` / `endTxn`). CrossPoint's bus layer also
+adds APB-frequency and light-sleep locks, but the current X4 Pro Arduino SDK
+configuration does not define `CONFIG_PM_ENABLE`, so those conditional locks
+are compiled out in this control build. Copying them cannot explain the
+observed difference with this SDK configuration. `ActiveLowReady` bus waiting
+changes do not apply to UC8179, whose driver selects `UcIdleHigh` in both
+sources.
+
+For UC8179 the upstream grayscale capability is full-frame, not tiled. Its
+reader runs a B/W base then copies LSB/MSB planes and activates gray; X4Libris
+overlaps plane rendering with an asynchronous B/W refresh. Matched emulator
+turns from both reach the same 625 ms preconditioning plus 150 ms gray
+activation. This narrows the remaining investigation to physical panel timing
+and exact plane content under matched book/layout conditions. It does not
+justify transplanting an unrelated SPI or strip-rendering change. Earlier
+physical rollback logs do not record display events at enough detail to test
+the user's later ten-second lightening.
