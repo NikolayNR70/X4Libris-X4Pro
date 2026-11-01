@@ -72,4 +72,7 @@ passed visual check. The probe logs and flash snapshots are in the local
 `x4pro-vector-candidate-emulator` artifact folder.
 Repeating the same short key probe against an unmodified v1.0 flash snapshot
 showed the same early boot/blank progression, so this probe does not isolate
-a candidate boot regression.
+a candidate boot regression. After a longer emulator wait, the candidate
+displayed its normal home screen (`key-late.png` in the local artifact folder).
+The scripted book navigation still has not yielded a valid custom-font reader
+comparison.
