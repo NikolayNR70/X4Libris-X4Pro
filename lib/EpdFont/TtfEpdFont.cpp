@@ -2,6 +2,7 @@
 
 #if CROSSPOINT_VECTOR_FONTS
 
+#include <Logging.h>
 #include <MemoryManager.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
@@ -150,12 +151,23 @@ void TtfEpdFont::initFace(Face& f) {
     f.ready = f.ft.init(s.data, s.len, f.sizePx, f.weight, f.wantItalic);
   }
   if (f.ready) {
-    // Keep FreeType's driver-native hinting. In particular, OpenType CFF fonts
-    // use the CFF driver's PostScript hinter; forcing the generic auto-hinter
-    // made OTF selection fail in builds without that optional, flash-heavy module.
     freeink::font::FtFont::RenderOptions ro;
+#if defined(FREEINK_FONT_ENABLE_AUTOHINT) && FREEINK_FONT_ENABLE_AUTOHINT
+    // Match CrossPoint's X4 Pro vector-font rasterization: snap thin stems to
+    // the pixel grid before the B/W threshold, then darken borderline strokes.
+    // Keep the original native-hinting path on builds without the auto-hinter.
+    ro.hinting = freeink::font::FtFont::HintingMode::Auto;
+    ro.stemDarkening = true;
+    if (!f.ft.setRenderOptions(ro)) {
+      LOG_ERR("TTF", "Auto hinting unavailable; falling back to native hinting");
+      ro.hinting = freeink::font::FtFont::HintingMode::Default;
+      ro.stemDarkening = false;
+      f.ft.setRenderOptions(ro);
+    }
+#else
     ro.hinting = freeink::font::FtFont::HintingMode::Default;
     f.ft.setRenderOptions(ro);
+#endif
     // GPOS kerning for RESIDENT faces only (they borrow a view into the font
     // bytes — free). Unlike GSUB, GPOS must stay resident for render-time
     // pair queries, and a STREAMED face would need an owned DRAM copy exactly

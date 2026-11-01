@@ -52,6 +52,20 @@ bool validate(const char* path) {
     std::fprintf(stderr, "glyph rasterization failed: %s\n", path);
     return false;
   }
+#if defined(FREEINK_FONT_ENABLE_AUTOHINT) && FREEINK_FONT_ENABLE_AUTOHINT
+  FtFont::RenderOptions options;
+  options.hinting = FtFont::HintingMode::Auto;
+  options.stemDarkening = true;
+  if (!font.setRenderOptions(options)) {
+    std::fprintf(stderr, "auto hinting was rejected: %s\n", path);
+    return false;
+  }
+  glyph = font.rasterize('A', 20);
+  if (!glyph || !glyph->pixels || glyph->width == 0 || glyph->height == 0) {
+    std::fprintf(stderr, "auto hinted glyph rasterization failed: %s\n", path);
+    return false;
+  }
+#endif
   std::printf("PASS %-32s family='%s' weight=%u italic=%u A=%ux%u\n", path, family,
               static_cast<unsigned>(info.weight), info.italic ? 1 : 0,
               static_cast<unsigned>(glyph->width), static_cast<unsigned>(glyph->height));

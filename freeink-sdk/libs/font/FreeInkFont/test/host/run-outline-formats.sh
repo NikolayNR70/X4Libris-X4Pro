@@ -7,7 +7,7 @@ BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/freeink-outline-formats.XXXXXX")
 trap 'rm -rf "$BUILD_DIR"' EXIT HUP INT TERM
 
 INCLUDES="-I$FONT_ROOT/include -I$FONT_ROOT/third_party/freetype/include -I$FONT_ROOT/third_party/stb"
-DEFINES='-DFREEINK_FONT_ENABLE_CFF=1 -DFREEINK_FONT_ENABLE_PSNAMES=1'
+DEFINES='-DFREEINK_FONT_ENABLE_CFF=1 -DFREEINK_FONT_ENABLE_PSNAMES=1 -DFREEINK_FONT_ENABLE_AUTOHINT=1'
 
 for source in "$FONT_ROOT"/src/freetype/*.c; do
   object="$BUILD_DIR/$(basename "$source" .c).o"

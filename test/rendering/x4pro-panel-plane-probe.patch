@@ -1,0 +1,50 @@
+diff --git a/hw/display/uc8179.c b/hw/display/uc8179.c
+index e914f71..0afd955 100644
+--- a/hw/display/uc8179.c
++++ b/hw/display/uc8179.c
+@@ -580,6 +580,17 @@ static uint64_t uc8179_refresh(Uc8179State *s)
+     }
+     timer_del(&s->drift_timer);
+     uc8179_relax(s, now, now > s->t_refresh);
++    uint64_t probe_old = UINT64_C(1469598103934665603);
++    uint64_t probe_new = UINT64_C(1469598103934665603);
++    for (int row = 0; row < H_ADDR; row++) {
++        for (int col = 0; col < WB; col++) {
++            probe_old = (probe_old ^ s->ram[PLANE_OLD][row][col]) *
++                        UINT64_C(1099511628211);
++            probe_new = (probe_new ^ s->ram[PLANE_NEW][row][col]) *
++                        UINT64_C(1099511628211);
++        }
++    }
++    unsigned probe_classes[5] = { 0 };
+     /* Apply the controller's gate-scan and source-shift directions. */
+     for (int y = 0; y < H; y++) {
+         int r = (s->psr & PSR_UD ? H - 1 - y : y) +
+@@ -597,8 +608,14 @@ static uint64_t uc8179_refresh(Uc8179State *s)
+             int o = (s->ram[PLANE_OLD][r][c / 8] >> (7 - c % 8)) & 1;
+             int nw = (s->ram[PLANE_NEW][r][c / 8] >> (7 - c % 8)) & 1;
+             s->cls[y][x] = o << 1 | nw;
++            probe_classes[s->cls[y][x]]++;
+         }
+     }
++    fprintf(stderr, "PANEL_PROBE refresh=%" PRIu64 " psr=%02x partial=%d "
++            "old=%016" PRIx64 " new=%016" PRIx64 " class=%u,%u,%u,%u,%u\n",
++            s->refreshes, s->psr, s->partial, probe_old, probe_new,
++            probe_classes[0], probe_classes[1], probe_classes[2],
++            probe_classes[3], probe_classes[4]);
+     if ((s->psr & PSR_REG) && s->uc8279_68) {
+         frames = uc8279_68_lut_frames(s);
+     } else {
+diff --git a/meson.build b/meson.build
+index 033de90..3c9decc 100644
+--- a/meson.build
++++ b/meson.build
+@@ -15,7 +15,7 @@ add_test_setup('slow', exclude_suites: ['thorough'],
+ add_test_setup('thorough',
+                env: ['G_TEST_SLOW=1', 'SPEED=thorough', 'RUST_BACKTRACE=1'])
+ 
+-meson.add_postconf_script(find_program('scripts/symlink-install-tree.py'))
++# Diagnostic build on Windows: no install-tree bundle is needed.
+ 
+ ####################
+ # Global variables #
