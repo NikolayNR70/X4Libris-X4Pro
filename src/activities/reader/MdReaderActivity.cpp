@@ -8,13 +8,8 @@
 #include <Utf8.h>
 
 #include <algorithm>
-#include <cstring>
 #include <functional>
-#include <memory>
-#include <new>
 #include <numeric>
-
-#include <BoardConfig.h>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -738,37 +733,13 @@ void MdReaderActivity::renderPage() {
   renderLines();
   scope.endScanAndPrewarm();
 
-  const bool capturedUc8179Aa =
-#if FREEINK_DEVICE_X4PRO
-      SETTINGS.textAntiAliasing && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
-#else
-      false;
-#endif
-  const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
-  std::unique_ptr<uint8_t[]> lsb, msb;
-  if (capturedUc8179Aa) {
-    lsb.reset(new (std::nothrow) uint8_t[planeBytes]);
-    if (lsb) msb.reset(new (std::nothrow) uint8_t[planeBytes]);
-    if (msb) {
-      std::memset(lsb.get(), 0, planeBytes);
-      std::memset(msb.get(), 0, planeBytes);
-      renderer.beginGrayCapture(lsb.get(), msb.get());
-    }
-  }
-
+  // BW rendering
   renderLines();
-  renderer.endGrayCapture();
   renderStatusBar();
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
-  if (msb) {
-    renderer.copyGrayscaleLsbBuffers(lsb.get());
-    renderer.copyGrayscaleMsbBuffers(msb.get());
-    renderer.displayGrayBuffer();
-    renderer.cleanupGrayscaleWithPreviousBuffer();
-  }
 
-  if (SETTINGS.textAntiAliasing && !capturedUc8179Aa) {
+  if (SETTINGS.textAntiAliasing) {
     // Same AA pass as EpubReaderActivity — see TxtReaderActivity::renderPage()
     // for why the legacy store/restore helper ghosted after swapBuffers().
     renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);

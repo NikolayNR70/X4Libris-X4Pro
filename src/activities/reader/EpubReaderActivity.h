@@ -413,11 +413,6 @@ class EpubReaderActivity final : public Activity {
   // because a stale plane pair belongs to a page that is no longer in the
   // framebuffer.
   bool preRenderedPlanesStaged_ = false;
-  // UC8179 keeps captured text AA masks until the pre-rendered B/W page is
-  // displayed. Staging them before that refresh lets the gray flush follow
-  // immediately, without two more whole-page text renders on screen.
-  std::unique_ptr<uint8_t[]> preRenderedAaLsb_;
-  std::unique_ptr<uint8_t[]> preRenderedAaMsb_;
   // Debug-only Background B (section pre-analysis) progress, surfaced as a small
   // status-bar overlay when DEBUG_BACKGROUND_WORK is enabled. Background A's state is
   // derived at draw time from pendingPreRender / preRenderedPage, so only B needs a
