@@ -8,6 +8,11 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cstring>
+#include <memory>
+#include <new>
+
+#include <BoardConfig.h>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -293,13 +298,37 @@ void TxtReaderActivity::renderPage() {
   renderLines();  // scan pass — text accumulated, no drawing
   scope.endScanAndPrewarm();
 
-  // BW rendering
+  const bool capturedUc8179Aa =
+#if FREEINK_DEVICE_X4PRO
+      SETTINGS.textAntiAliasing && BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
+#else
+      false;
+#endif
+  const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
+  std::unique_ptr<uint8_t[]> lsb, msb;
+  if (capturedUc8179Aa) {
+    lsb.reset(new (std::nothrow) uint8_t[planeBytes]);
+    if (lsb) msb.reset(new (std::nothrow) uint8_t[planeBytes]);
+    if (msb) {
+      std::memset(lsb.get(), 0, planeBytes);
+      std::memset(msb.get(), 0, planeBytes);
+      renderer.beginGrayCapture(lsb.get(), msb.get());
+    }
+  }
+
   renderLines();
+  renderer.endGrayCapture();
   renderStatusBar();
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+  if (msb) {
+    renderer.copyGrayscaleLsbBuffers(lsb.get());
+    renderer.copyGrayscaleMsbBuffers(msb.get());
+    renderer.displayGrayBuffer();
+    renderer.cleanupGrayscaleWithPreviousBuffer();
+  }
 
-  if (SETTINGS.textAntiAliasing) {
+  if (SETTINGS.textAntiAliasing && !capturedUc8179Aa) {
     // Same AA pass as EpubReaderActivity: displayBuffer() above ended with
     // swapBuffers(), so the write framebuffer now holds the stale previous
     // frame. renderGrayscalePlanesSequential() reseeds the controller baseline

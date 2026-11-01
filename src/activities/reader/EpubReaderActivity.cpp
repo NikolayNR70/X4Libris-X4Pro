@@ -5065,6 +5065,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   // A navigation that skipped pageTurn()'s hand-off leaves the AA and pre-render of the page it
   // left: drop them first, so the guard below cannot shelve this pass as that page's pre-render.
   dropStagedWorkIfPositionMoved("render");
+  if (!preRenderedPage.ready) {
+    preRenderedAaLsb_.reset();
+    preRenderedAaMsb_.reset();
+  }
   if (usesDeferredAa() && pendingGrayscale_.active && pendingPreRender && !usePreRenderedBuffer &&
       classifyRenderPass() == RenderPass::PreRender) {
     // Logged so the pre-render chain has no silent link left: a deferred pass that is
@@ -5093,6 +5097,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (pass != RenderPass::PreRender && pass != RenderPass::BufferDisplay && preRenderedPage.ready) {
     preRenderedPage.ready = false;
     preRenderedPlanesStaged_ = false;
+    preRenderedAaLsb_.reset();
+    preRenderedAaMsb_.reset();
   }
 
   switch (pass) {
@@ -5411,6 +5417,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // are a by-product of the page render rather than ~1 s of extra work, so
   // there is no pass for a page turn to abort.
   const bool singlePushAaThisRender = aaEnabledForThisRender && renderer.supportsGrayFrame();
+  const bool capturedUc8179AaThisRender =
+#if FREEINK_DEVICE_X4PRO
+      aaEnabledForThisRender &&
+      BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
+#else
+      false;
+#endif
 
   const bool effectiveForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
   pageHasPlaceholders = page->hasPlaceholderImages(effectiveForceLoad, imageMonochrome);
@@ -5438,12 +5451,26 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   // allocation failure falls back the same way.
   const size_t capPlaneBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
-  if (singlePushAaThisRender) {
+  if (singlePushAaThisRender || capturedUc8179AaThisRender) {
     capLsb = makeUniqueNoThrow<uint8_t[]>(capPlaneBytes);
     capMsb = capLsb ? makeUniqueNoThrow<uint8_t[]>(capPlaneBytes) : nullptr;
     if (capMsb) {
       memset(capLsb.get(), 0, capPlaneBytes);
       memset(capMsb.get(), 0, capPlaneBytes);
+      if (capturedUc8179AaThisRender && page->hasImages()) {
+        // Image gray cache uses the same selector masks as the old post-B/W
+        // replay. Stage it before the B/W frame so image tones survive too.
+        renderer.clearScreen(0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+        page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        memcpy(capLsb.get(), renderer.getFrameBuffer(), capPlaneBytes);
+        renderer.clearScreen(0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+        page->renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        memcpy(capMsb.get(), renderer.getFrameBuffer(), capPlaneBytes);
+        renderer.setRenderMode(GfxRenderer::BW);
+        renderer.clearScreen();
+      }
       renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
@@ -5578,8 +5605,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
   }
-  const bool inlineAaThisRender =
-      aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable && !aaPreempted;
+  const bool inlineAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender &&
+                                  !capturedUc8179AaThisRender && inlineAaAvailable && !aaPreempted;
   // UC8179's public CrossPoint reader completes the B/W base before uploading
   // the two AA planes. Keep that sequence on X4 Pro/UC8179 instead of the
   // interleaved async path; displayBuffer() also reaches the driver's existing
@@ -5591,9 +5618,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
       false;
 #endif
   // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
-  const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable;
+  const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender &&
+                                    !capturedUc8179AaThisRender && !inlineAaAvailable;
   lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
-  if (capLsb) {
+  if (capturedUc8179AaThisRender) {
+    renderer.displayBuffer(pageRefreshMode);
+  } else if (capLsb) {
     // Hand the captured planes to the controller, then base + greys go out as
     // one waveform. Cheap: the planes were filled by the page render that just
     // ran, so nothing is walked twice.
@@ -5636,7 +5666,27 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingHalfRefreshAfterImagePage = true;
   }
 
-  if (singlePushAaThisRender) {
+  if (capturedUc8179AaThisRender) {
+    if (capLsb && !aaPreempted) {
+      const unsigned long tPlanes = millis();
+      renderer.copyGrayscaleLsbBuffers(capLsb.get());
+      renderer.copyGrayscaleMsbBuffers(capMsb.get());
+      const unsigned long tGray = millis();
+      renderer.displayGrayBuffer();
+      const unsigned long tRestore = millis();
+      renderer.cleanupGrayscaleWithPreviousBuffer();
+      LOG_DBG("ERS", "UC8179 captured AA: plane upload=%lums gray=%lums restore=%lums",
+              tGray - tPlanes, tRestore - tGray, millis() - tRestore);
+      lastRenderStats.usedGrayscale = true;
+      lastRenderStats.textAntiAliasing = true;
+    } else if (!capLsb) {
+      LOG_INF("ERS", "UC8179 captured AA unavailable: B/W frame shown without delayed touch-up");
+      lastRenderStats.textAntiAliasing = false;
+    } else {
+      LOG_DBG("ERS", "UC8179 captured AA skipped: page preempted by navigation");
+      lastRenderStats.textAntiAliasing = false;
+    }
+  } else if (singlePushAaThisRender) {
     // Nothing to schedule and nothing to restore: the planes were staged before
     // the page render and went out with it in one waveform. No deferred pass, so
     // no second refresh for the idle loop to run and nothing for a page turn to
@@ -5917,8 +5967,18 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   // Buffers live only for this function; the planes are handed to the controller
   // before it returns and the display consumes them at the page turn.
   preRenderedPlanesStaged_ = false;
+  preRenderedAaLsb_.reset();
+  preRenderedAaMsb_.reset();
   std::unique_ptr<uint8_t[]> capLsb, capMsb;
-  const bool wantCapture = renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !page.hasImages();
+  const bool captureUc8179Aa =
+#if FREEINK_DEVICE_X4PRO
+      getEffectiveTextAntiAliasing() &&
+      BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
+#else
+      false;
+#endif
+  const bool wantCapture = captureUc8179Aa ||
+                           (renderer.supportsGrayFrame() && getEffectiveTextAntiAliasing() && !page.hasImages());
   if (wantCapture) {
     const size_t planeBytes = static_cast<size_t>(renderer.getDisplayWidthBytes()) * renderer.getDisplayHeight();
     capLsb = makeUniqueNoThrow<uint8_t[]>(planeBytes);
@@ -5926,6 +5986,17 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
     if (capMsb) {
       memset(capLsb.get(), 0, planeBytes);
       memset(capMsb.get(), 0, planeBytes);
+      if (captureUc8179Aa && page.hasImages()) {
+        renderer.clearScreen(0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+        page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        memcpy(capLsb.get(), renderer.getFrameBuffer(), planeBytes);
+        renderer.clearScreen(0x00);
+        renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+        page.renderImagesFromGrayscaleCache(renderer, orientedMarginLeft, contentTop);
+        memcpy(capMsb.get(), renderer.getFrameBuffer(), planeBytes);
+        renderer.setRenderMode(GfxRenderer::BW);
+      }
       renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
@@ -5936,7 +6007,10 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   renderer.clearScreen();
   page.render(renderer, getEffectiveReaderFontId(), orientedMarginLeft, contentTop);
   renderer.endGrayCapture();
-  if (capLsb) {
+  if (captureUc8179Aa && capLsb) {
+    preRenderedAaLsb_ = std::move(capLsb);
+    preRenderedAaMsb_ = std::move(capMsb);
+  } else if (capLsb) {
     renderer.copyGrayscaleLsbBuffers(capLsb.get());
     renderer.copyGrayscaleMsbBuffers(capMsb.get());
     preRenderedPlanesStaged_ = true;
@@ -6007,6 +6081,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // out as one waveform, exactly as a freshly rendered page does. Anything else
   // falls through to the B/W display plus the two-push AA replay below.
   const bool singlePushThisPage = preRenderedPlanesStaged_ && !secondaryBufferDegraded_;
+  const bool capturedUc8179Aa = preRenderedAaLsb_ && preRenderedAaMsb_ && !secondaryBufferDegraded_;
   preRenderedPlanesStaged_ = false;
   // Lent for a build-through rather than lost to an OOM: the X3 diffs against its own copy of
   // the frame on screen, so the normal cadence stays correct (and AA stays off below).
@@ -6038,6 +6113,20 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // Capture before the AA replay below overwrites the renderer's last-mode (see renderContents).
   lastPageRefreshMode_ = renderer.getLastRefreshMode();
   lastPageDisplayModeByte_ = renderer.getLastDisplayModeByte();
+  const bool capturedAaPreempted = capturedUc8179Aa && aaPreemptedByNavigation();
+  if (capturedUc8179Aa && !capturedAaPreempted) {
+    const unsigned long tPlanes = millis();
+    renderer.copyGrayscaleLsbBuffers(preRenderedAaLsb_.get());
+    renderer.copyGrayscaleMsbBuffers(preRenderedAaMsb_.get());
+    const unsigned long tGray = millis();
+    renderer.displayGrayBuffer();
+    const unsigned long tRestore = millis();
+    renderer.cleanupGrayscaleWithPreviousBuffer();
+    LOG_DBG("ERS", "UC8179 pre-rendered AA: plane upload=%lums gray=%lums restore=%lums",
+            tGray - tPlanes, tRestore - tGray, millis() - tRestore);
+  }
+  preRenderedAaLsb_.reset();
+  preRenderedAaMsb_.reset();
 
   // The image-page bookkeeping renderContents() does, in the form it takes for a pre-rendered
   // page: the pre-render shows a page only when every image on it replayed from its cache, so
@@ -6060,7 +6149,14 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   if (aaPreempted) {
     LOG_DBG("ERS", "AA replay skipped: page preempted by navigation");
   }
-  if (!singlePushThisPage && !aaPreempted && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
+  const bool uc8179Panel =
+#if FREEINK_DEVICE_X4PRO
+      BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8179;
+#else
+      false;
+#endif
+  if (!uc8179Panel && !capturedUc8179Aa && !singlePushThisPage && !aaPreempted &&
+      getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
       !secondaryBufferDegraded_) {
     const int fontId = getEffectiveReaderFontId();
     // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
