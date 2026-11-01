@@ -1,5 +1,14 @@
 # X4 Pro UC8179 sequential text AA experiment
 
+## Physical trial update (2026-11-01)
+
+The user reports that this second test image also rolled back. The SD card
+with the new boot logs is not currently mounted, so the failure mode of this
+trial cannot yet be attributed to the boot guard, a crash, or another cause.
+The OTA file has been renamed with `.obsolete-do-not-flash` in the primary
+record. Do not recommend reflashing this image. Diagnose the new logs before
+making another firmware candidate.
+
 Base: published X4Libris v1.0 source `fdc38cf`. This branch has not changed
 the v1.0 release, tag, or `main`.
 
