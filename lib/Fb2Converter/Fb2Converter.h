@@ -30,10 +30,10 @@ struct ReaderBook {
   std::vector<ReaderImage> images;
 };
 
-// Reads only FictionBook title, first author, and first title-info sequence. A ZIP/FBZ source must
-// contain exactly one .fb2 entry. Does not create the reader's rendered cache.
+// Reads the title-info prefix without creating the reader's rendered cache.
+// Description is optional so library indexing does not allocate annotation text.
 bool readMetadata(const std::string& source, std::string& title, std::string& author, std::string& series,
-                  std::string& seriesIndex, std::string& error);
+                  std::string& seriesIndex, std::string& error, std::string* description = nullptr);
 
 // Parses the original FB2 and writes only private renderer cache files (XHTML
 // sections, images, stylesheet and index) under /.x4libris. It never creates

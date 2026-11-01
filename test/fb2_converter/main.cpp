@@ -2,6 +2,15 @@
 
 #include <iostream>
 int main(int argc, char** argv) {
+  if (argc == 3 && std::string(argv[1]) == "--metadata") {
+    std::string title, author, series, seriesIndex, description, error;
+    if (!Fb2Converter::readMetadata(argv[2], title, author, series, seriesIndex, error, &description)) {
+      std::cerr << error;
+      return 1;
+    }
+    std::cout << title << "\n" << author << "\n" << series << "\n" << seriesIndex << "\n" << description;
+    return 0;
+  }
   if (argc == 3 && std::string(argv[1]) == "--source-path") {
     std::cout << Fb2Converter::sourcePath(argv[2]);
     return 0;

@@ -20,3 +20,6 @@ target_link_libraries(Fb2ConverterHost PRIVATE crosspoint_test_common inflate_re
 add_test(NAME Fb2ConverterPublication
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_tests.py $<TARGET_FILE:Fb2ConverterHost>
 )
+add_test(NAME Fb2AnnotationMetadata
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/annotation_verify.py $<TARGET_FILE:Fb2ConverterHost>
+)

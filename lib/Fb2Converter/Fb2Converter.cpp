@@ -162,6 +162,9 @@ struct Converter {
   size_t chapter = 0, nextChapter = 0;
   int bodyDepth = 0, sectionDepth = 0, titleInfoDepth = 0, binary = -1;
   int metadataAuthorDepth = 0;
+  int metadataAnnotationDepth = 0;
+  bool wantMetadataDescription = false;
+  std::string metadataDescription;
   bool render = false, metadataOnly = false, metadataComplete = false, active = false, root = false, note = false, coverPage = false,
        capturingStylesheet = false;
   unsigned b64 = 0;
@@ -252,6 +255,8 @@ struct Converter {
       Frame f;
       f.name = n;
       if (n == "title-info") titleInfoDepth = static_cast<int>(stack.size()) + 1;
+      if (wantMetadataDescription && titleInfoDepth && n == "annotation")
+        metadataAnnotationDepth = static_cast<int>(stack.size()) + 1;
       if (titleInfoDepth && n == "sequence" && series.empty()) {
         series = attr(a, "name");
         seriesIndex = attr(a, "number");
@@ -432,6 +437,13 @@ struct Converter {
     if (stack.empty() || !error.empty()) return;
     if (metadataOnly) {
       const auto name = stack.back().name;
+      if (metadataAnnotationDepth && (name == "p" || name == "v" || name == "empty-line")) {
+        if (!metadataDescription.empty() && metadataDescription.back() == ' ') metadataDescription.pop_back();
+        if (metadataDescription.size() < 16384 && !metadataDescription.empty() && metadataDescription.back() != '\n')
+          metadataDescription += '\n';
+      }
+      if (name == "annotation" && static_cast<int>(stack.size()) == metadataAnnotationDepth)
+        metadataAnnotationDepth = 0;
       if (name == capture && titleInfoDepth) {
         auto first = captured.find_first_not_of(" \t\r\n");
         auto last = captured.find_last_not_of(" \t\r\n");
@@ -504,6 +516,17 @@ struct Converter {
   void chars(const char* s, int n) {
     if (!error.empty()) return;
     if (metadataOnly) {
+      if (metadataAnnotationDepth) {
+        for (int i = 0; i < n && metadataDescription.size() < 16384; ++i) {
+          const unsigned char ch = static_cast<unsigned char>(s[i]);
+          if (isspace(ch)) {
+            if (!metadataDescription.empty() && metadataDescription.back() != ' ' && metadataDescription.back() != '\n')
+              metadataDescription += ' ';
+          } else {
+            metadataDescription += static_cast<char>(ch);
+          }
+        }
+      }
       if (!capture.empty() && captured.size() < 2048)
         captured.append(s, std::min<size_t>(n, 2048 - captured.size()));
       return;
@@ -1160,12 +1183,14 @@ bool extractFb2MetadataPrefix(const std::string& archivePath, const std::string&
 }  // namespace
 
 bool Fb2Converter::readMetadata(const std::string& source, std::string& title, std::string& author,
-                                std::string& series, std::string& seriesIndex, std::string& error) {
+                                std::string& series, std::string& seriesIndex, std::string& error,
+                                std::string* description) {
   title.clear();
   author.clear();
   series.clear();
   seriesIndex.clear();
   error.clear();
+  if (description) description->clear();
 
   const bool zippedFb2 = endsWithIgnoreCase(source, ".zip") || endsWithIgnoreCase(source, ".fbz");
   if (!zippedFb2 && !endsWithIgnoreCase(source, ".fb2")) {
@@ -1210,6 +1235,7 @@ bool Fb2Converter::readMetadata(const std::string& source, std::string& title, s
     error = "Not enough memory for FB2 metadata";
   } else {
     converter->metadataOnly = true;
+    converter->wantMetadataDescription = description != nullptr;
     const bool ok = parse(*converter, *parseSource);
     if (!ok || !converter->root) {
       error = converter->error.empty() ? "Cannot parse FB2 metadata" : converter->error;
@@ -1218,6 +1244,12 @@ bool Fb2Converter::readMetadata(const std::string& source, std::string& title, s
       author = converter->author;
       series = converter->series;
       seriesIndex = converter->seriesIndex;
+      if (description) {
+        auto& value = converter->metadataDescription;
+        const auto first = value.find_first_not_of(" \t\r\n");
+        const auto last = value.find_last_not_of(" \t\r\n");
+        if (first != std::string::npos) *description = value.substr(first, last - first + 1);
+      }
     }
   }
 

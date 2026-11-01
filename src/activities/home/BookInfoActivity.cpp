@@ -2,6 +2,7 @@
 
 #include <Bitmap.h>
 #include <Epub.h>
+#include <Fb2Converter.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -168,9 +169,18 @@ void BookInfoActivity::loadData() {
     coverBmpPath = Storage.exists(thumbPath.c_str()) ? thumbPath : "";
     loadSucceeded = true;
   } else if (FsHelpers::hasFb2Extension(filePath)) {
-    // FB2 metadata is captured when the reader opens the book and stored in
-    // recent.json. Do not route these files through the EPUB parser: FB2 and
-    // ZIP-wrapped FB2 have their own reader path.
+    // Read only title-info here. The recent entry does not contain the FB2
+    // annotation, and opening the entire book would stall the Info screen.
+    std::string metadataTitle, metadataAuthor, metadataSeries, metadataSeriesIndex, error;
+    if (Fb2Converter::readMetadata(filePath, metadataTitle, metadataAuthor, metadataSeries,
+                                   metadataSeriesIndex, error, &description)) {
+      if (!metadataTitle.empty()) title = metadataTitle;
+      if (!metadataAuthor.empty()) author = metadataAuthor;
+      if (!metadataSeries.empty()) series = metadataSeries;
+      seriesIndex = metadataSeriesIndex;
+    } else {
+      LOG_ERR("BookInfo", "Failed to read FB2 metadata: %s", error.c_str());
+    }
     loadSucceeded = true;
   } else if (FsHelpers::hasTxtExtension(filePath) || FsHelpers::hasMarkdownExtension(filePath)) {
     // Plain text has no embedded metadata, but its .opf sidecar can supply

@@ -974,7 +974,10 @@ void setup() {
   // bring-up below because that one spends 250 ms in delay(): on a non-self-latching
   // unit the rail must already be held before anything blocks for that long.
   BoardConfig::holdPowerRails();
-  FirstBootGuard::begin();
+  // An intentional in-app restart during first use is not a failed OTA boot.
+  // The guard still checks the reset reason and rejects WDT/panic/power resets.
+  FirstBootGuard::begin(silentRebootMagic == SILENT_REBOOT_MAGIC &&
+                        silentRebootTarget <= SILENT_REBOOT_TARGET_MAX);
 
 #ifdef ENABLE_SERIAL_LOG
   // Earliest possible Serial setup, and UNCONDITIONAL — see the isUsbConnected()

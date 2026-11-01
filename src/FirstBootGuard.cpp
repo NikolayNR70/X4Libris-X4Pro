@@ -56,16 +56,16 @@ void clearResetGrace() {
     nvs_commit(prefs);
   }
 }
-bool resetGraceRequiresRollback() {
+bool resetGraceRequiresRollback(bool plannedSoftwareRestart) {
   uint8_t enabled = 0;
   if (!prefs || nvs_get_u8(prefs, "reset_grace", &enabled) != ESP_OK || !enabled) return false;
   if (resetWindowExpired()) {
     clearResetGrace();
     return false;
   }
-  // Deep-sleep wake is the normal power-button path on X4 Pro. Any other
-  // restart during the grace window is treated as a failed run.
-  return esp_reset_reason() != ESP_RST_DEEPSLEEP;
+  // Deep-sleep wake is the normal power-button path. A firmware-initiated
+  // restart is also valid; crash, watchdog and unexpected resets still fail.
+  return !plannedSoftwareRestart && esp_reset_reason() != ESP_RST_DEEPSLEEP;
 }
 // Verify the actual bytes, not only an app descriptor. The firmware's patched
 // image header is rejected by esp_image_verify on some OEM bootloaders.
@@ -150,19 +150,27 @@ const esp_partition_t* priorSlot(const esp_partition_t* running) {
 }
 void deadline(void*) {
   if (!probation) return;
-  if (health.healthyAtDeadline(millis())) {
+  const uint32_t now = millis();
+  if (health.healthyAtDeadline(now)) {
     if (accept()) {
-      LOG_INF("BOOT", "Trial accepted after 30 seconds without a startup failure");
+      LOG_INF("BOOT", "Trial accepted after responsive startup");
       return;
     }
     LOG_ERR("BOOT", "Trial could not be committed; attempting to restore the previous image");
   } else {
-    LOG_ERR("BOOT", "Trial failed: startup did not remain healthy for the 30-second check");
+    // A navigation or book render can occupy the loop at the 30-second mark.
+    // Wait for a healthy idle frame, but retain a bounded rollback deadline
+    // for an actual hang or a UI that never became usable.
+    constexpr uint32_t MAX_TRIAL_MS = 90000;
+    constexpr uint64_t RETRY_US = 1000000;
+    if (health.elapsedMs(now) < MAX_TRIAL_MS && timer && esp_timer_start_once(timer, RETRY_US) == ESP_OK) return;
+    LOG_ERR("BOOT", "Trial failed: no responsive UI within the 90-second limit");
   }
   rollback();
 }
 }
-void begin() {
+void begin(bool plannedSoftwareRestart) {
+  plannedSoftwareRestart = plannedSoftwareRestart && esp_reset_reason() == ESP_RST_SW;
   const auto running=esp_ota_get_running_partition();
   // NVS must already have been initialised by the Arduino core. Do not erase it
   // if opening/writing fails: leave the OEM pending state unconfirmed.
@@ -174,7 +182,7 @@ void begin() {
   }
   if(std::memcmp(record.accepted,runningHash,32)==0) {
     if(record.pending) {record.pending=0;if(!save()) {rollback();esp_restart();return;}}
-    if (resetGraceRequiresRollback()) {
+    if (resetGraceRequiresRollback(plannedSoftwareRestart)) {
       previous=at(record.fallback);
       if (previous) {
         LOG_ERR("BOOT", "Non-sleep reset during the 180-second post-install window; reverting to the previous image");
@@ -199,7 +207,7 @@ void begin() {
   nvs_get_u32(prefs,"trialseq",&priorSequence);
   // Missing sequence on a legacy record is treated conservatively as a failed
   // trial. A different image (including upgrading from .4) gets a fresh trial.
-  if(record.pending && std::memcmp(record.trial,runningHash,32)==0 &&
+  if(record.pending && !plannedSoftwareRestart && std::memcmp(record.trial,runningHash,32)==0 &&
      (!sequence || !priorSequence || sequence==priorSequence)) {
     previous=at(record.fallback);
     rollback(); // a reboot before explicit acceptance is a failed trial
@@ -279,7 +287,7 @@ bool prepareUpdate() {
   return true;
 }
 #else
-void begin(){}
+void begin(bool){}
 void observeHealthyLoop(unsigned long, bool){}
 bool active(){return false;}
 bool hasFallback(){return false;}

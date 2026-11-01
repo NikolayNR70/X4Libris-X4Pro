@@ -1,6 +1,6 @@
 #pragma once
 namespace FirstBootGuard {
-void begin();
+void begin(bool plannedSoftwareRestart = false);
 void observeHealthyLoop(unsigned long now, bool ready);
 bool active();
 bool hasFallback();
