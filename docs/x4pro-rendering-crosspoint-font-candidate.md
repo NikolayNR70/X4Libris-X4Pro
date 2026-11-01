@@ -124,3 +124,24 @@ pages are **not** a controlled same-font contrast comparison. Keep the donor
 screenshots and the candidate screenshot as navigation evidence only. A
 physical comparison must select and verify the identical installed font in
 both firmwares before judging rendering quality.
+
+## Official CrossPoint 2.0.0 source control
+
+Built the official stable CrossPoint 2.0.0 X4 Pro target from tag `42d58da`
+with its pinned submodules. The local build passed and fits the 0x640000 app
+partition (5,377,152 bytes, SHA-256
+`BD68FDFF6D936A6F9146B5B9D52167A59194F57EEB9DB139F296FA8C8F168188`).
+Its build log and reference-only image are under the primary workstation's
+`_primary-record/artifacts/2026-11-02/`. This image has not been flashed.
+
+The first emulator attempt still showed the built-in font. Source inspection
+identified a test-fixture mistake: for a loose `/fonts/Ubuntu-Regular.ttf`,
+CrossPoint registers the family as `Ubuntu-Regular`, while the settings asked
+for `Ubuntu`. A second SD snapshot adds byte-identical `/fonts/Ubuntu.ttf` so
+the requested name resolves. With that card, the official build uses about
+350 KiB more PSRAM at reader startup and displays visibly different Ubuntu
+glyphs. The same TTF bytes and 14 pt request are therefore available to both
+CrossPoint and the X4Libris candidate. Emulator pages still differ in layout
+and raster treatment, and screenshots cannot prove physical fade, ghosting,
+or panel charge behavior. Do not attribute the user's report to Noto Sans;
+they also observe it with their own fonts.
