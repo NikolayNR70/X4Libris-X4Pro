@@ -64,6 +64,23 @@ for BW, `{1,2}` for gray MSB and `{2}` for gray LSB on UC8179. This is a source
 comparison, not proof that full-page masks and panel RAM bytes are equal:
 X4Libris has a different reader and buffer lifecycle.
 
+## Exact donor BIN waveform check
+
+The user's observation also holds with the same personally selected fonts.
+To check whether the custom donor BIN carries a different UC8179 waveform than
+its public source, the two verified OTA binaries were scanned for the distinctive
+12-byte starts of the UC8179 gray tables. The 215-byte preconditioning table at
+donor offset `0x3a510` is byte-identical to v1.0 at `0x3e984`. The 215-byte
+short gray table at donor `0x3a611` is byte-identical to v1.0 at `0x3ea85`.
+The separate 42-byte dark-gray table at donor `0x3a5e7` matches v1.0 at
+`0x3ea5b`. This is a binary comparison of the actual supplied donor and
+released v1.0, not an assumption about the donor's source.
+
+Consequently, a different embedded gray LUT is not supported as the cause of
+the contrast gap. These bytes do not show which table is selected on each page
+or what pixel masks are sent. The remaining comparison must inspect the plane
+contents and previous-frame state, with the same font and rendering settings.
+
 ## Next diagnostic gate
 
 Capture actual base and gray plane contents and controller RAM baseline across
