@@ -11,12 +11,25 @@ The URL must refer to an existing writable root directory; do not append
 upload. The password is stored with the project's device-bound obfuscation and
 is not returned by the web settings API.
 
+In Android AlReader, use its normal book CRC for the sync filename. The APK
+also offers a simplified filename option for non-AlReader.com providers; when
+enabled, it uses the first 96 Java characters of the book filename (with most
+punctuation replaced by `_`) plus `.sync`. This candidate currently uses the
+CRC mode, so the simplified filename option must be off for matching records.
+Books must be the same edition/content on both devices for the key and text
+position to match.
+
 For each book, the client reads or writes
 `<base>/AlReaderX-01Sync/<AlReader book key>`. The file is UTF-8 text with
 `!<sync device ID>!<normalized text position>`, matching the APK's position
 record. A missing file means no shared position yet. After upload, X4Libris
 reads the record back and checks the ID and position. On a conflict, the reader
 asks whether to send its position or use the remote one.
+
+The HTTP transport sends an explicit `Content-Length`, including zero for
+an empty `MKCOL` request. A PUT first tries the existing collection and only
+attempts `MKCOL` after a 409 conflict, then retries the PUT. AlReader.com's
+separate service protocol remains frozen and is not contacted by this client.
 
 Only this isolated development branch contains the candidate. The released
 v1.0 firmware and KOReader sync implementation are unchanged. A build and

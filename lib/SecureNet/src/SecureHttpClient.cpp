@@ -131,7 +131,13 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
   }
   for (const std::string& h : _headers) req += h + "\r\n";
   if (!_rangeHeader.empty()) req += "Range: " + _rangeHeader + "\r\n";
-  if (body && bodyLen) req += "Content-Length: " + std::to_string(bodyLen) + "\r\n";
+  // Write methods need explicit framing even when their body is empty. Some
+  // servers reject a bodyless POST/MKCOL before the application sees it.
+  // Never emit Transfer-Encoding alongside this known, exact byte count.
+  if (bodyLen || std::strcmp(method, "POST") == 0 || std::strcmp(method, "PUT") == 0 ||
+      std::strcmp(method, "MKCOL") == 0) {
+    req += "Content-Length: " + std::to_string(bodyLen) + "\r\n";
+  }
   req += "\r\n";
 
   const uint32_t sendStartMs = millis();

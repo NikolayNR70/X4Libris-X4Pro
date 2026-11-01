@@ -117,7 +117,15 @@ Result request(const bool update, const std::string& baseUrl, const std::string&
   crosspoint::SecureHttpClient http;
   configure(http, username, password);
   if (update) {
-    // The folder is created lazily, as in AlReader's own WebDAV provider.
+    http.addHeader("Content-Type", "*/*");
+  } else {
+    http.addHeader("Accept", "text/plain, */*");
+  }
+  int status = update ? http.PUT(file, encodePositionRecord(*record)) : http.GET(file);
+  if (update && status == 409) {
+    // A missing parent collection is the WebDAV meaning of 409 for PUT.
+    // Do not require MKCOL permission when AlReader's folder already exists.
+    http.clearHeaders();
     const int mkdirStatus = http.request("MKCOL", folder);
     if (mkdirStatus != 201 && mkdirStatus != 405 && mkdirStatus != 200 && mkdirStatus != 204) {
       result.httpStatus = mkdirStatus >= 100 ? mkdirStatus : 0;
@@ -126,10 +134,8 @@ Result request(const bool update, const std::string& baseUrl, const std::string&
       return result;
     }
     http.addHeader("Content-Type", "*/*");
-  } else {
-    http.addHeader("Accept", "text/plain, */*");
+    status = http.PUT(file, encodePositionRecord(*record));
   }
-  const int status = update ? http.PUT(file, encodePositionRecord(*record)) : http.GET(file);
   result.httpStatus = status >= 100 ? status : 0;
   if (status < 100) {
     result.error = Error::Transport;

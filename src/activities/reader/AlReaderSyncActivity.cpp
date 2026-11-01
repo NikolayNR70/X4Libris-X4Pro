@@ -24,8 +24,8 @@
 
 namespace {
 constexpr unsigned long kResultHoldMs = 1400;
-// UPDATE performs MKCOL and PUT on one worker job. Leave room for a Wi-Fi
-// reconnect and clock setup in addition to both bounded HTTP requests.
+// UPDATE may perform PUT, MKCOL and a retry on one worker job. Leave room for
+// Wi-Fi reconnect and clock setup in addition to the bounded HTTP requests.
 constexpr unsigned long kPhaseTimeoutMs = 50000;
 constexpr unsigned long kPreparationTimeoutMs = 45000;
 int32_t localSyncId() {
