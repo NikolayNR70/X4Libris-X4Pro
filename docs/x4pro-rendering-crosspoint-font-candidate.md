@@ -81,3 +81,11 @@ folder and then opened and paged the EPUB (`key-library-late.png`,
 `key-books.ppm`, `indexed-open.png`). This establishes a basic EPUB reader
 smoke check in QEMU. The test used the default built-in font, so it does not
 exercise the changed runtime vector-font path or verify physical contrast.
+
+A second isolated SD image put the original Noto Sans TTF in `/fonts/` and set
+`sdFontFamilyName` to `Noto Sans` while keeping the built-in fallback as
+Bookerly. The candidate opened the same EPUB with sans-serif glyphs in QEMU
+(`_primary-record/artifacts/2026-11-02/x4pro-vector-font-emulator/key-open.png`),
+so the raw SD font selection and runtime vector path were exercised. This is
+still a digital raster check; it does not establish equal optical behavior to
+CrossPoint or remove the user's physical fading report.
