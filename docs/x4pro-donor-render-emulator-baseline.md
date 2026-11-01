@@ -40,10 +40,34 @@ features. The user explicitly confirmed preservation of both.
   different panel path. The donor is a custom `-fb2` binary, and its exact
   source has not been identified.
 
+## Longer single-chapter probe
+
+The two-page EPUB above crossed a chapter boundary and made the donor build a
+new section, resetting its full-refresh counter. That did not represent normal
+turns. A clean 256 MiB FAT32 SD image with a 220-paragraph, single-chapter EPUB
+was then used for both images. Each opened the book and advanced four pages.
+QEMU panel trace (`-d trace:uc8179_refresh`) and final screenshots are saved
+under `_primary-record/artifacts/2026-11-01/{donor-longbook,v1-longbook-read}`.
+
+On ordinary turns after the initial page, **both** traces show the same
+waveform classes: UC8179 `psr=0x3f`, partial 25-frame / 625 ms gray
+preconditioning, followed by `psr=0x3f`, nonpartial 6-frame / 150 ms gray
+activation. The first page and navigation to it differ in refresh count;
+those differences do not explain progressive fading within continued reading.
+The user reports the visual gap also with their own fonts, so changing the
+default font is not the proposed fix.
+
+The public CrossPoint UC8179 driver's page and gray waveforms match the
+X4Libris driver's logic; the latter mostly substitutes equivalent EpdBus
+transaction calls. Both default 2-bit glyph masks select raw levels `{1,2,3}`
+for BW, `{1,2}` for gray MSB and `{2}` for gray LSB on UC8179. This is a source
+comparison, not proof that full-page masks and panel RAM bytes are equal:
+X4Libris has a different reader and buffer lifecycle.
+
 ## Next diagnostic gate
 
-Use identical font and refresh settings, then capture matched B/W and gray
-planes plus UC8179 commands for a multi-page text sample. Compare the donor
-against X4Libris after each page turn, then verify any candidate on the user's
-physical X4 Pro. Do not infer a fix from QEMU timing or copy only the driver:
-the X4Libris reader has additional rendering policies and caches.
+Capture actual base and gray plane contents and controller RAM baseline across
+matched page turns, especially after several pages. Check physical settings
+and panel response on the user's X4 Pro before another OTA candidate. QEMU's
+optical waveform is an approximation and cannot prove ghosting or fading.
+Do not infer a fix from matching waveform classes or copy only the driver.
