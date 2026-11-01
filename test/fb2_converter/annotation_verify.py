@@ -44,15 +44,18 @@ with tempfile.TemporaryDirectory(prefix='fb2-annotation-') as tmp:
         assert paragraphs[0].find(ns + 'strong') is not None
         assert paragraphs[1].get('style') == 'text-align: center'
         assert paragraphs[1].find(ns + 'em') is not None
-        assert '.anno { font-style: italic; }' in (cache / 'fb2.css').read_text(encoding='utf-8')
+        css = (cache / 'fb2.css').read_text(encoding='utf-8')
+        assert '.fb2-annotation { margin-bottom: 1em; font-style: italic; }' in css
+        assert '.fb2-annotation p { font-style: italic; }' in css
+        assert '.anno { font-style: italic; }' in css
         assert 'Текст книги.' in ''.join(body.itertext())
 
         if source == '/book.fb2':
-            old_cache = Path(str(cache).replace('fb2-reader-v5-', 'fb2-reader-v4-'))
+            old_cache = Path(str(cache).replace('fb2-reader-v6-', 'fb2-reader-v5-'))
             old_cache.mkdir(parents=True)
             (old_cache / 'progress.bin').write_bytes(b'previous-progress')
             (old_cache / 'bookmarks.bin').write_bytes(b'previous-bookmarks')
-            older_cache = Path(str(cache).replace('fb2-reader-v5-', 'fb2-reader-v3-'))
+            older_cache = Path(str(cache).replace('fb2-reader-v6-', 'fb2-reader-v3-'))
             older_cache.mkdir(parents=True)
             (older_cache / 'progress.bin').write_bytes(b'stale-progress')
             shutil.rmtree(cache)

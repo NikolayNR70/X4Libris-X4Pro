@@ -37,7 +37,8 @@ p { text-indent: 1.2em; margin-top: 0; margin-bottom: 0; }
 .fb2-stanza { margin-top: 0.5em; margin-bottom: 0.5em; }
 .fb2-verse { text-indent: 0; text-align: left; }
 .fb2-empty-line { text-indent: 0; margin-top: 0; margin-bottom: 0; }
-.fb2-annotation { margin-bottom: 1em; }
+.fb2-annotation { margin-bottom: 1em; font-style: italic; }
+.fb2-annotation p { font-style: italic; }
 )CSS";
 constexpr size_t MAX_CHAPTERS = 512, MAX_IDS = 4096, MAX_IMAGES = 256;
 constexpr uint32_t CRC32_NIBBLE_TABLE[16] = {
@@ -1368,14 +1369,17 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
 
   const size_t sourceHash = std::hash<std::string>{}(source);
   char key[64];
-  snprintf(key, sizeof(key), "fb2-reader-v5-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
+  snprintf(key, sizeof(key), "fb2-reader-v6-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
            static_cast<unsigned long>(book.sourceCrc));
   book.cacheDir = FsHelpers::unpackCachePath(key, static_cast<uint32_t>(sourceHash));
-  char oldKeyV4[64], oldKeyV3[64];
+  char oldKeyV5[64], oldKeyV4[64], oldKeyV3[64];
+  snprintf(oldKeyV5, sizeof(oldKeyV5), "fb2-reader-v5-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
+           static_cast<unsigned long>(book.sourceCrc));
   snprintf(oldKeyV4, sizeof(oldKeyV4), "fb2-reader-v4-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
            static_cast<unsigned long>(book.sourceCrc));
   snprintf(oldKeyV3, sizeof(oldKeyV3), "fb2-reader-v3-%08lx-%08lx", static_cast<unsigned long>(sourceHash),
            static_cast<unsigned long>(book.sourceCrc));
+  const std::string previousCacheDirV5 = FsHelpers::unpackCachePath(oldKeyV5, static_cast<uint32_t>(sourceHash));
   const std::string previousCacheDirV4 = FsHelpers::unpackCachePath(oldKeyV4, static_cast<uint32_t>(sourceHash));
   const std::string previousCacheDirV3 = FsHelpers::unpackCachePath(oldKeyV3, static_cast<uint32_t>(sourceHash));
   if (!FsHelpers::prepareBookCachePath(book.cacheDir)) {
@@ -1501,7 +1505,7 @@ bool Fb2Converter::prepareReaderCache(const std::string& source, ReaderBook& boo
   for (const char* name : {"progress.bin", "bookmarks.bin", "linkstack.bin", "kosync_push.bin"}) {
     const std::string newPath = book.cacheDir + "/" + name;
     if (Storage.exists(newPath.c_str())) continue;
-    for (const auto& previousCacheDir : {previousCacheDirV4, previousCacheDirV3}) {
+    for (const auto& previousCacheDir : {previousCacheDirV5, previousCacheDirV4, previousCacheDirV3}) {
       const std::string oldPath = previousCacheDir + "/" + name;
       if (!Storage.exists(oldPath.c_str())) continue;
       if (!Storage.copyFile("FB2", oldPath, newPath.c_str()))
