@@ -70,3 +70,6 @@ probe showed a blank display. No reader-page or custom-font comparison was
 established for this candidate in QEMU; this is a test limitation, not a
 passed visual check. The probe logs and flash snapshots are in the local
 `x4pro-vector-candidate-emulator` artifact folder.
+Repeating the same short key probe against an unmodified v1.0 flash snapshot
+showed the same early boot/blank progression, so this probe does not isolate
+a candidate boot regression.
